@@ -41,6 +41,12 @@ React/TypeScript, Ubuntu 24.04 SSH provisioning, Cloudflare DNS-01, Xray,
 
 ## Rulings
 
+- Shared-host nodes have persisted per-node REALITY/WebSocket/Trojan/statistics ports. Legacy nodes
+  retain 443/8443/2053/10085; shared defaults use 2087/8443/2053/10086 and reserve panel listeners.
+- Pending port changes and queued installation jobs share a node row lock/transaction. After identity
+  activation ports remain immutable, including failed-verification nodes with a potentially live agent.
+  Preflight checks the actual owning PID even on managed reinstallations.
+
 - Added downloadable GitHub bootstrap for `moeendehqan/rahpanel`: shallow clone into `/opt/rahpanel`,
   safe resume, pinned branch/tag option and terminal prompting during piped execution.
 - Bootstrap contracts and browser first-login setup passed. Installed endpoint URLs are populated

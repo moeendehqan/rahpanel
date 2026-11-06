@@ -15,6 +15,7 @@ import (
 var ErrCoreStopped = errors.New("Xray process stopped")
 
 type Config struct {
+	StatsPort int    `json:"stats_port"`
 	NodeID    string `json:"node_id"`
 	URL       string `json:"url"`
 	Directory string `json:"directory"`

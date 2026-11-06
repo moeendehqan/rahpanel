@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,8 +72,27 @@ func (w *Worker) run(parent context.Context, r Request) {
 		return
 	}
 	defer client.Close()
-	pre, e := remote(client, preflight)
+	script, e := preflightScript(n)
 	if e != nil {
+		fail(e.Error())
+		return
+	}
+	pre, e := remote(client, script)
+	if e != nil {
+		for _, line := range strings.Split(string(pre), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "PORT_CONFLICT:") {
+				port, err := strconv.Atoi(strings.TrimPrefix(line, "PORT_CONFLICT:"))
+				if err == nil {
+					fail(fmt.Sprintf("Port %d is used by another service. Select a free port in installation settings.", port))
+					return
+				}
+			}
+			if line == "MANAGED_NODE_MISMATCH" || line == "UNMANAGED_RAH_INSTALLATION" {
+				fail("Existing Rah installation belongs to another node or is not safely identified; no services were changed")
+				return
+			}
+		}
 		fail("Preflight failed: Ubuntu 24.04, sudo access, free ports and disk are required")
 		return
 	}
@@ -134,7 +154,7 @@ func (w *Worker) run(parent context.Context, r Request) {
 		return
 	}
 	files := units()
-	agentConfig, _ := json.Marshal(agent.Config{NodeID: n.ID, URL: cfg.AgentURL, Directory: "/etc/rahpanel"})
+	agentConfig, _ := json.Marshal(agent.Config{NodeID: n.ID, URL: cfg.AgentURL, Directory: "/etc/rahpanel", StatsPort: n.EffectivePorts().Stats})
 	for name, b := range map[string][]byte{"agent": binary, "xray": xray, "agent.json": agentConfig, "client.crt": crt, "client.key": key, "ca.crt": w.CA.Certificate, "tls.crt": cert.Certificate, "tls.key": cert.Key, "xray.json": config} {
 		files[name] = b
 	}
@@ -154,7 +174,12 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Cannot activate node identity")
 		return
 	}
-	if _, e = remote(client, strings.ReplaceAll(installScript, "STAGING_DIRECTORY", stage)); e != nil {
+	script, e = installNodeScript(stage, n)
+	if e != nil {
+		fail(e.Error())
+		return
+	}
+	if _, e = remote(client, script); e != nil {
 		fail("Remote installation failed; retry with SSH credentials after correcting host prerequisites")
 		return
 	}

@@ -246,6 +246,14 @@ func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
 	n.RealityTarget = cfg.RealityTarget
 	n.RealitySNI = cfg.RealitySNI
 	n.Enabled = true
+	n.Ready = false
+	n.PortsLocked = false
+	n.Verified = []string{}
+	n.Ports = n.EffectivePorts()
+	if e := n.Ports.Validate(n.SharedHost); e != nil {
+		problem(w, 400, e.Error())
+		return
+	}
 	if n.Name == "" {
 		problem(w, 400, "Name required")
 		return
@@ -315,7 +323,18 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j := core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}
-	if e = s.Store.Job(r.Context(), j); e != nil {
+	if c.Ports != nil {
+		ports := c.Ports.WithDefaults(n.SharedHost)
+		if e = ports.Validate(n.SharedHost); e != nil {
+			problem(w, 400, e.Error())
+			return
+		}
+	}
+	if e = s.Store.QueueInstall(r.Context(), j, c.Ports); e != nil {
+		if errors.Is(e, store.ErrNodePortsLocked) {
+			problem(w, 409, e.Error())
+			return
+		}
 		problem(w, 409, "A job is already active for this node")
 		return
 	}

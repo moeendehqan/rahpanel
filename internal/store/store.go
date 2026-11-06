@@ -109,7 +109,7 @@ func (s *Store) SaveUser(ctx context.Context, u core.User, create bool) error {
 	return nil
 }
 func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
-	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path FROM nodes ORDER BY name`)
+	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port,(client_serial<>'' OR ready) FROM nodes ORDER BY name`)
 	if e != nil {
 		return nil, e
 	}
@@ -118,7 +118,7 @@ func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
 	for rows.Next() {
 		var n core.Node
 		var secret, verified []byte
-		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath); e != nil {
+		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.PortsLocked); e != nil {
 			return nil, e
 		}
 		n.RealityPrivate, e = core.Open(s.Key, secret)
@@ -145,12 +145,48 @@ func (s *Store) Node(ctx context.Context, id string) (core.Node, error) {
 	return core.Node{}, sql.ErrNoRows
 }
 func (s *Store) AddNode(ctx context.Context, n core.Node) error {
+	n.Ports = n.EffectivePorts()
+	if e := n.Ports.Validate(n.SharedHost); e != nil {
+		return e
+	}
 	secret, e := core.Seal(s.Key, n.RealityPrivate)
 	if e != nil {
 		return e
 	}
-	_, e = s.DB.ExecContext(ctx, `INSERT INTO nodes(id,name,host,domain,group_id,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, n.ID, n.Name, n.Host, n.Domain, n.GroupID, n.RealityTarget, n.RealitySNI, secret, n.RealityPublic, n.ShortID, n.WSPath)
+	_, e = s.DB.ExecContext(ctx, `INSERT INTO nodes(id,name,host,domain,group_id,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, n.ID, n.Name, n.Host, n.Domain, n.GroupID, n.RealityTarget, n.RealitySNI, secret, n.RealityPublic, n.ShortID, n.WSPath, n.SharedHost, n.Ports.Reality, n.Ports.WebSocket, n.Ports.Trojan, n.Ports.Stats)
 	return e
+}
+
+var ErrNodePortsLocked = errors.New("ports cannot change after node identity activation; reinstall using its existing ports")
+
+// Lock the node while updating pending ports and queuing the job. A conflicting
+// concurrent install rolls back its port changes with the failed unique insert.
+func (s *Store) QueueInstall(ctx context.Context, j core.Job, requested *core.NodePorts) error {
+	tx, e := s.DB.BeginTx(ctx, nil)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	var n core.Node
+	if e = tx.QueryRowContext(ctx, `SELECT ready,shared_host,reality_port,websocket_port,trojan_port,stats_port,(client_serial<>'') FROM nodes WHERE id=$1 FOR UPDATE`, j.NodeID).Scan(&n.Ready, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.PortsLocked); e != nil {
+		return e
+	}
+	if requested != nil {
+		ports := requested.WithDefaults(n.SharedHost)
+		if e = ports.Validate(n.SharedHost); e != nil {
+			return e
+		}
+		if (n.Ready || n.PortsLocked) && ports != n.Ports {
+			return ErrNodePortsLocked
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE nodes SET reality_port=$2,websocket_port=$3,trojan_port=$4,stats_port=$5 WHERE id=$1`, j.NodeID, ports.Reality, ports.WebSocket, ports.Trojan, ports.Stats); e != nil {
+			return e
+		}
+	}
+	if _, e = tx.ExecContext(ctx, `INSERT INTO jobs(id,node_id,status,step,error) VALUES($1,$2,$3,$4,$5)`, j.ID, j.NodeID, j.Status, j.Step, j.Error); e != nil {
+		return e
+	}
+	return tx.Commit()
 }
 func (s *Store) Credentials(ctx context.Context, nodeID string, users []core.User) ([]core.Credential, error) {
 	tx, e := s.DB.BeginTx(ctx, nil)

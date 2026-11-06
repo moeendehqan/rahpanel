@@ -52,6 +52,12 @@ func Watchdog(ctx context.Context, dir string) error {
 	}
 }
 func Run(ctx context.Context, cfg Config) error {
+	if cfg.StatsPort == 0 {
+		cfg.StatsPort = 10085
+	}
+	if cfg.StatsPort < 1 || cfg.StatsPort > 65535 {
+		return fmt.Errorf("invalid statistics port")
+	}
 	if cfg.Directory == "" {
 		cfg.Directory = "/etc/rahpanel"
 	}
@@ -109,7 +115,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		samplingCtx, samplingCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer samplingCancel()
-		run, values, e := readStats(samplingCtx)
+		run, values, e := readStats(samplingCtx, cfg.StatsPort)
 		if errors.Is(e, ErrCoreStopped) {
 			lastApplied = ""
 			return nil
@@ -296,7 +302,7 @@ func running(ctx context.Context) bool {
 	b, e := command(ctx, "systemctl", "show", "rah-xray.service", "--property=MainPID", "--value")
 	return e == nil && strings.TrimSpace(string(b)) != "0" && strings.TrimSpace(string(b)) != ""
 }
-func readStats(ctx context.Context) (string, map[string]int64, error) {
+func readStats(ctx context.Context, statsPort int) (string, map[string]int64, error) {
 	pid, e := command(ctx, "systemctl", "show", "rah-xray.service", "--property=MainPID", "--value")
 	if e != nil {
 		return "", nil, e
@@ -322,7 +328,7 @@ func readStats(ctx context.Context) (string, map[string]int64, error) {
 		return "", nil, fmt.Errorf("invalid process stat")
 	}
 	run := boot + ":" + p + ":" + fields[19]
-	raw, e := command(ctx, "/usr/local/bin/rah-xray", "api", "statsquery", "--server=127.0.0.1:10085", "-pattern", "user>>>")
+	raw, e := command(ctx, "/usr/local/bin/rah-xray", "api", "statsquery", fmt.Sprintf("--server=127.0.0.1:%d", statsPort), "-pattern", "user>>>")
 	if e != nil {
 		if !running(ctx) {
 			return "", nil, ErrCoreStopped

@@ -17,6 +17,9 @@ type Group struct {
 	Name string `json:"name"`
 }
 type Node struct {
+	SharedHost     bool      `json:"shared_host"`
+	Ports          NodePorts `json:"ports"`
+	PortsLocked    bool      `json:"ports_locked"`
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	Host           string    `json:"host"`

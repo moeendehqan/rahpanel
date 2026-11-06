@@ -39,19 +39,20 @@ func verifyTransport(ctx context.Context, n core.Node, kind, healthURL string) e
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	credential := core.ProbeCredential(n)
+	ports := n.EffectivePorts()
 	stream := map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"serverName": n.RealitySNI, "fingerprint": "chrome", "publicKey": n.RealityPublic, "shortId": n.ShortID, "spiderX": "/"}}
 	protocol := "vless"
-	targetPort := 443
+	targetPort := ports.Reality
 	user := map[string]any{"id": credential.UUID, "encryption": "none", "flow": "xtls-rprx-vision"}
 	settings := map[string]any{}
 	if kind == "websocket" {
-		targetPort = 8443
+		targetPort = ports.WebSocket
 		user = map[string]any{"id": credential.UUID, "encryption": "none"}
 		stream = map[string]any{"network": "ws", "security": "tls", "tlsSettings": map[string]any{"serverName": n.Domain}, "wsSettings": map[string]any{"path": n.WSPath, "headers": map[string]string{"Host": n.Domain}}}
 	}
 	if kind == "trojan" {
 		protocol = "trojan"
-		targetPort = 2053
+		targetPort = ports.Trojan
 		settings["servers"] = []any{map[string]any{"address": n.Host, "port": targetPort, "password": credential.Password}}
 		stream = map[string]any{"network": "tcp", "security": "tls", "tlsSettings": map[string]string{"serverName": n.Domain}}
 	} else {

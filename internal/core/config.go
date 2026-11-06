@@ -14,6 +14,10 @@ import (
 
 // BuildConfig deliberately avoids sniffing and access logs: no destination history.
 func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byte, error) {
+	ports := n.EffectivePorts()
+	if err := ports.Validate(n.SharedHost); err != nil {
+		return nil, err
+	}
 	active := map[string]bool{}
 	for _, u := range users {
 		if u.Active(now) {
@@ -48,10 +52,10 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 		"stats":  map[string]any{},
 		"policy": map[string]any{"levels": map[string]any{"0": map[string]bool{"statsUserUplink": true, "statsUserDownlink": true}}},
 		"inbounds": []any{
-			map[string]any{"tag": "api", "listen": "127.0.0.1", "port": 10085, "protocol": "dokodemo-door", "settings": map[string]string{"address": "127.0.0.1"}},
-			inbound("reality", "vless", 443, reality, map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"show": false, "target": n.RealityTarget, "xver": 0, "serverNames": []string{n.RealitySNI}, "privateKey": n.RealityPrivate, "shortIds": []string{n.ShortID}}}),
-			inbound("websocket", "vless", 8443, ws, map[string]any{"network": "ws", "security": "tls", "tlsSettings": tls, "wsSettings": map[string]string{"path": n.WSPath}}),
-			inbound("trojan", "trojan", 2053, trojan, map[string]any{"network": "tcp", "security": "tls", "tlsSettings": tls}),
+			map[string]any{"tag": "api", "listen": "127.0.0.1", "port": ports.Stats, "protocol": "dokodemo-door", "settings": map[string]string{"address": "127.0.0.1"}},
+			inbound("reality", "vless", ports.Reality, reality, map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"show": false, "target": n.RealityTarget, "xver": 0, "serverNames": []string{n.RealitySNI}, "privateKey": n.RealityPrivate, "shortIds": []string{n.ShortID}}}),
+			inbound("websocket", "vless", ports.WebSocket, ws, map[string]any{"network": "ws", "security": "tls", "tlsSettings": tls, "wsSettings": map[string]string{"path": n.WSPath}}),
+			inbound("trojan", "trojan", ports.Trojan, trojan, map[string]any{"network": "tcp", "security": "tls", "tlsSettings": tls}),
 		},
 		"outbounds": []any{map[string]any{"tag": "direct", "protocol": "freedom", "settings": map[string]string{"domainStrategy": "UseIP"}}, map[string]any{"tag": "block", "protocol": "blackhole"}},
 		"routing": map[string]any{"domainStrategy": "IPOnDemand", "rules": []any{
@@ -74,18 +78,22 @@ func Subscription(nodes []Node, creds []Credential) string {
 		if !n.Ready {
 			continue
 		}
+		ports := n.EffectivePorts()
+		if ports.Validate(n.SharedHost) != nil {
+			continue
+		}
 		for _, c := range creds {
 			if c.NodeID != n.ID {
 				continue
 			}
 			for _, kind := range n.Verified {
 				q := url.Values{}
-				scheme, secret, host, port := "vless", c.UUID, n.Domain, 8443
+				scheme, secret, host, port := "vless", c.UUID, n.Domain, ports.WebSocket
 				q.Set("type", "tcp")
 				switch kind {
 				case "reality":
 					host = n.Host
-					port = 443
+					port = ports.Reality
 					q.Set("security", "reality")
 					q.Set("sni", n.RealitySNI)
 					q.Set("pbk", n.RealityPublic)
@@ -103,7 +111,7 @@ func Subscription(nodes []Node, creds []Credential) string {
 				case "trojan":
 					scheme = "trojan"
 					secret = c.Password
-					port = 2053
+					port = ports.Trojan
 					q.Set("security", "tls")
 					q.Set("sni", n.Domain)
 				default:

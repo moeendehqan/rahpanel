@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"github.com/pkg/sftp"
+	"github.com/rahpanel/rahpanel/internal/core"
 	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
@@ -17,12 +18,13 @@ import (
 )
 
 type SSHCredentials struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Username    string `json:"username"`
-	Password    string `json:"password,omitempty"`
-	PrivateKey  string `json:"private_key,omitempty"`
-	Fingerprint string `json:"fingerprint"`
+	Ports       *core.NodePorts `json:"ports,omitempty"`
+	Host        string          `json:"host"`
+	Port        int             `json:"port"`
+	Username    string          `json:"username"`
+	Password    string          `json:"password,omitempty"`
+	PrivateKey  string          `json:"private_key,omitempty"`
+	Fingerprint string          `json:"fingerprint"`
 }
 
 func (c SSHCredentials) Address() (string, error) {
@@ -140,26 +142,80 @@ func agentBinary(arch string) ([]byte, error) {
 	return os.ReadFile(filepath.Join("artifacts", "rah-agent-linux-"+arch))
 }
 
+func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+
+func preflightScript(n core.Node) (string, error) {
+	p := n.EffectivePorts()
+	if e := p.Validate(n.SharedHost); e != nil {
+		return "", e
+	}
+	ports := []string{}
+	for _, port := range p.All() {
+		ports = append(ports, strconv.Itoa(port))
+	}
+	return "node_id=" + shellQuote(n.ID) + "\nports=" + shellQuote(strings.Join(ports, " ")) + "\n" + preflight, nil
+}
+
 const preflight = `
 set -euo pipefail
+managed_dir='/etc/rahpanel'
 . /etc/os-release
 [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 24.04 ] || { echo OS_UNSUPPORTED; exit 1; }
 [ "$(id -u)" = 0 ]
 [ "$(df -Pm / | awk 'NR==2{print $4}')" -gt 512 ]
 command -v systemctl >/dev/null
 command -v ss >/dev/null
-if [ ! -f /etc/rahpanel/managed ]; then
- for port in 443 8443 2053 10085; do
-  if ss -H -ltn "sport = :$port" | grep -q .; then echo PORT_CONFLICT; exit 1; fi
- done
+owned=0
+if [ -f "$managed_dir/managed" ]; then
+ owner=$(cat "$managed_dir/managed")
+ if [ "$owner" = "$node_id" ] || { [ -z "$owner" ] && grep -Fq '"node_id":"'"$node_id"'"' "$managed_dir/agent.json"; }; then
+  owned=1
+ else
+  echo MANAGED_NODE_MISMATCH; exit 1
+ fi
+elif [ -d "$managed_dir" ] && [ -n "$(ls -A "$managed_dir")" ]; then
+ echo UNMANAGED_RAH_INSTALLATION; exit 1
 fi
+if [ "$owned" = 0 ] && { [ -f /etc/systemd/system/rah-agent.service ] || [ -f /etc/systemd/system/rah-xray.service ] || [ -f /usr/local/bin/rah-agent ]; }; then
+ echo UNMANAGED_RAH_INSTALLATION; exit 1
+fi
+pid=0
+if [ "$owned" = 1 ]; then pid=$(systemctl show rah-xray.service --property=MainPID --value 2>/dev/null || true); fi
+for port in $ports; do
+ listeners=$(ss -H -ltnp "sport = :$port")
+ if [ -n "$listeners" ]; then
+  if [ "$owned" != 1 ] || [ -z "$pid" ] || [ "$pid" = 0 ]; then echo "PORT_CONFLICT:$port"; exit 1; fi
+  if ! printf '%s\n' "$listeners" | awk -v expected="$pid" '
+   { line=$0; found=0;
+     while(match(line,/pid=[0-9]+/)) {
+      if(substr(line,RSTART,RLENGTH)!="pid="expected) exit 1;
+      found=1; line=substr(line,RSTART+RLENGTH);
+     }
+     if(!found) exit 1;
+   }'; then echo "PORT_CONFLICT:$port"; exit 1; fi
+ fi
+done
 uname -m
 `
+
+func installNodeScript(stage string, n core.Node) (string, error) {
+	p := n.EffectivePorts()
+	if e := p.Validate(n.SharedHost); e != nil {
+		return "", e
+	}
+	rules := []string{}
+	for _, port := range p.Public() {
+		rules = append(rules, fmt.Sprintf(" ufw allow %d/tcp comment 'rahpanel'", port))
+	}
+	return "stage=" + shellQuote(stage) + "\nnode_id=" + shellQuote(n.ID) + "\n" + strings.ReplaceAll(installScript, "FIREWALL_RULES", strings.Join(rules, "\n")), nil
+}
+
 const installScript = `
 set -euo pipefail
-stage=STAGING_DIRECTORY
 trap 'rm -rf -- "$stage"' EXIT
 install -d -m 700 /etc/rahpanel
+printf '%s\n' "$node_id" > /etc/rahpanel/managed
+chmod 600 /etc/rahpanel/managed
 install -m 755 "$stage/agent" /usr/local/bin/rah-agent.new
 install -m 755 "$stage/xray" /usr/local/bin/rah-xray.new
 /usr/local/bin/rah-xray.new version >/dev/null
@@ -175,12 +231,8 @@ rm -f /etc/rahpanel/identity.json /etc/rahpanel/lease.json
 for unit in rah-agent.service rah-watchdog.service rah-xray.service; do
  install -m 644 "$stage/$unit" "/etc/systemd/system/$unit"
 done
-touch /etc/rahpanel/managed
-chmod 600 /etc/rahpanel/managed
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
- ufw allow 443/tcp comment 'rahpanel'
- ufw allow 8443/tcp comment 'rahpanel'
- ufw allow 2053/tcp comment 'rahpanel'
+FIREWALL_RULES
 fi
 systemctl daemon-reload
 systemctl enable rah-agent.service rah-watchdog.service

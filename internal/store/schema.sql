@@ -17,3 +17,8 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS client_key bytea;
 -- Keep legacy columns for compatibility, but erase the retired second-factor material.
 ALTER TABLE admins ALTER COLUMN totp SET DEFAULT ''::bytea;
 UPDATE admins SET totp=''::bytea,last_totp=0 WHERE octet_length(totp)>0 OR last_totp<>0;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS shared_host boolean NOT NULL DEFAULT false;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS reality_port integer NOT NULL DEFAULT 443 CHECK(reality_port BETWEEN 1 AND 65535);
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS websocket_port integer NOT NULL DEFAULT 8443 CHECK(websocket_port BETWEEN 1 AND 65535);
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS trojan_port integer NOT NULL DEFAULT 2053 CHECK(trojan_port BETWEEN 1 AND 65535);
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS stats_port integer NOT NULL DEFAULT 10085 CHECK(stats_port BETWEEN 1 AND 65535);

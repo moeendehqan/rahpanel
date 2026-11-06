@@ -78,7 +78,11 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 			t.Fatal(err)
 		}
 		peer.NotAfter = time.Now().Add(time.Hour)
-		_, err = s.DB.Exec(`INSERT INTO nodes(id,name,host,domain,group_id,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,client_serial) VALUES('rotation-node','rotation','192.0.2.5','rotation.example.com','default','example.com:443','example.com',$1,'public','abcd','/ws',$2)`, []byte("unused"), serial)
+		encryptedReality, err := core.Seal(s.Key, "unused")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.DB.Exec(`INSERT INTO nodes(id,name,host,domain,group_id,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,client_serial) VALUES('rotation-node','rotation','192.0.2.5','rotation.example.com','default','example.com:443','example.com',$1,'public','abcd','/ws',$2)`, encryptedReality, serial)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,6 +177,57 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	if !strings.Contains(res.Body.String(), `"configured":true`) {
 		t.Fatal("completed setup not reported")
 	}
+	t.Run("shared host creation and installation port locking", func(t *testing.T) {
+		res := request("POST", "/api/v1/nodes", `{"name":"panel node","host":"192.0.2.10","group_id":"default","shared_host":true}`, cookie)
+		if res.Code != 201 {
+			t.Fatalf("create shared node: %d %s", res.Code, res.Body)
+		}
+		var n core.Node
+		if err := json.Unmarshal(res.Body.Bytes(), &n); err != nil {
+			t.Fatal(err)
+		}
+		if !n.SharedHost || n.Ports.Reality != 2087 || n.Ports.Stats != 10086 {
+			t.Fatalf("shared defaults missing: %+v", n.Ports)
+		}
+		if request("POST", "/api/v1/nodes", `{"name":"bad shared node","host":"192.0.2.11","group_id":"default","shared_host":true,"ports":{"reality":443}}`, cookie).Code != 400 {
+			t.Fatal("reserved panel listener accepted")
+		}
+		p := n.Ports
+		p.Reality = 12087
+		job := core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}
+		if err := s.QueueInstall(context.Background(), job, &p); err != nil {
+			t.Fatal(err)
+		}
+		other := p
+		other.Reality = 22087
+		if err := s.QueueInstall(context.Background(), core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}, &other); err == nil {
+			t.Fatal("concurrent active installation accepted")
+		}
+		got, err := s.Node(context.Background(), n.ID)
+		if err != nil || got.Ports != p {
+			t.Fatal("conflicting job changed persisted ports", err)
+		}
+		job.Status = "completed"
+		if err = s.Job(context.Background(), job); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.DB.Exec("UPDATE nodes SET client_serial='active-identity' WHERE id=$1", n.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.QueueInstall(context.Background(), core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}, &other); err != store.ErrNodePortsLocked {
+			t.Fatal("failed verification allowed deployed agent port edits", err)
+		}
+		got, err = s.Node(context.Background(), n.ID)
+		if err != nil || !got.PortsLocked || got.Ports != p {
+			t.Fatal("deployed port lock not exposed", err)
+		}
+		if _, err = s.DB.Exec("UPDATE nodes SET ready=true WHERE id=$1", n.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.QueueInstall(context.Background(), core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}, &other); err != store.ErrNodePortsLocked {
+			t.Fatal("ready node ports changed", err)
+		}
+	})
 	response = request("POST", "/api/v1/logout", "", cookie)
 	if response.Code != 200 {
 		t.Fatal("logout failed")

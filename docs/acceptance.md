@@ -10,6 +10,8 @@ Lease tests use boot uptime, include reboot and deadline boundaries, and bound e
 
 - Provision two clean Ubuntu 24.04 hosts, including one arm64 if offered in a release, through the UI without editing host configuration.
 - Confirm SSH fingerprint mismatch sends no authentication credentials.
+- On a shared panel host, preserve existing Nginx and other cores; verify custom public ports,
+  loopback-only statistics, subscription/probe port consistency and retry after a selected port conflict.
 - Exercise insufficient sudo, occupied ports, upload interruption, panel restart, DNS denial, ACME failure and retry. Check owned DNS records remain identifiable and unrelated records untouched.
 - Verify all three authenticated public transports using Xray probes and then real v2rayNG/v2rayN clients. Check DNS, IPv6 and UDP under each client's VPN/TUN implementation.
 - Cut panel connectivity and kill the reconciler; verify watchdog stops every Xray process within 300 seconds of the last successful lease request. Repeat with wall-clock changes and host reboot.
