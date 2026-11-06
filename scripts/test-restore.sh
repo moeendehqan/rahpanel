@@ -12,7 +12,9 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$RESTORE_TEST_LOG"
 case "$*" in
  *'pg_restore --list'*) cat >/dev/null; exit "${BAD_ARCHIVE:-0}" ;;
- *pg_dump*) printf previous-backup; exit 0 ;;
+ *pg_dump*)
+  if IFS= read -r unexpected; then echo 'Backup inherited caller stdin' >&2; exit 2; fi
+  printf previous-backup; exit 0 ;;
  *pg_restore*)
   [[ "$*" == *--single-transaction* ]] || exit 2
   cat >/dev/null
@@ -24,6 +26,7 @@ MOCK
 chmod +x "$test_dir/bin/docker"
 export PATH="$test_dir/bin:$PATH" RESTORE_TEST_LOG="$test_dir/docker.log"
 cd "$test_dir/project"
+printf 'caller-input\n' | bash scripts/backup.sh >/dev/null
 printf 'RESTORE\n' | bash scripts/restore.sh "$test_dir/incoming.dump" >/dev/null
 grep -q 'pg_restore --list' "$RESTORE_TEST_LOG"
 grep -q 'pg_restore .*--single-transaction' "$RESTORE_TEST_LOG"
