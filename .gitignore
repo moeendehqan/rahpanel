@@ -1,0 +1,16 @@
+.tools/
+node_modules/
+dist/
+bin/
+.env
+*.exe
+*.log
+coverage/
+.superpowers/
+artifacts/
+bootstrap-admin.txt
+backups/
+*.tsbuildinfo
+test-results/
+playwright-report/
+.install.lock/

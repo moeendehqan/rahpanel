@@ -1,0 +1,78 @@
+name: rahpanel
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  db:
+    image: postgres:17.4-bookworm
+    environment:
+      POSTGRES_USER: rah
+      POSTGRES_DB: rah
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run rahctl init first}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rah -d rah"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+  panel:
+    build: .
+    image: rahpanel:local
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?required}
+      MASTER_KEY: ${MASTER_KEY:?required}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required initially}
+      ADMIN_TOTP_SECRET: ${ADMIN_TOTP_SECRET:?required initially}
+      PUBLIC_URL: ${PUBLIC_URL:?required}
+      AGENT_URL: ${AGENT_URL:?required}
+    ports:
+      - "9443:9443"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/rahctl", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+    read_only: true
+    tmpfs:
+      - /tmp:exec,size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  edge:
+    image: caddy:2.9.1-alpine
+    environment:
+      PANEL_HOST: ${PANEL_HOST:?required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      panel:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+volumes:
+  database:
+  caddy_data:
+  caddy_config:

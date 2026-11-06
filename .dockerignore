@@ -1,0 +1,15 @@
+.git
+.tools
+web/node_modules
+web/dist
+artifacts
+.env
+bootstrap-admin.txt
+backups
+bin
+*.exe
+.install.lock
+.superpowers
+web/test-results
+web/playwright-report
+*.log
