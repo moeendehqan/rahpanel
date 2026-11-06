@@ -2,16 +2,11 @@ package server
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
-	"encoding/base32"
-	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"github.com/rahpanel/rahpanel/internal/core"
 	"github.com/rahpanel/rahpanel/internal/provision"
 	"github.com/rahpanel/rahpanel/internal/security"
@@ -50,9 +45,22 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	if _, e = s.DB.Exec("TRUNCATE users,nodes,jobs,reports,credentials,sessions,admins,settings,audit CASCADE"); e != nil {
 		t.Fatal(e)
 	}
-	secret := "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
-	if e = BootstrapAdmin(context.Background(), s, "admin", "a-long-test-password", secret); e != nil {
+	if e = BootstrapAdmin(context.Background(), s, "admin", "a-long-test-password"); e != nil {
 		t.Fatal(e)
+	}
+	// Upgrade an existing administrator without resetting its password or retaining the retired seed.
+	if _, e = s.DB.Exec("UPDATE admins SET totp=$1,last_totp=42", []byte("legacy-encrypted-seed")); e != nil {
+		t.Fatal(e)
+	}
+	upgraded, e := store.New(context.Background(), parsed.String(), make([]byte, 32))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var seedLength, lastCounter int
+	e = upgraded.DB.QueryRow("SELECT octet_length(totp),last_totp FROM admins WHERE username='admin'").Scan(&seedLength, &lastCounter)
+	upgraded.DB.Close()
+	if e != nil || seedLength != 0 || lastCounter != 0 {
+		t.Fatal("retired second-factor material survived migration", e)
 	}
 	ca, e := security.NewAuthority()
 	if e != nil {
@@ -106,15 +114,13 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		return w
 	}
-	key, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, uint64(time.Now().Unix()/30))
-	mac := hmac.New(sha1.New, key)
-	mac.Write(b)
-	sum := mac.Sum(nil)
-	o := sum[len(sum)-1] & 15
-	otp := fmt.Sprintf("%06d", (binary.BigEndian.Uint32(sum[o:o+4])&0x7fffffff)%1000000)
-	login := fmt.Sprintf(`{"username":"admin","password":"a-long-test-password","code":"%s"}`, otp)
+	if request("POST", "/api/v1/login", `{"username":"admin","password":"wrong-password"}`, nil).Code != 401 {
+		t.Fatal("wrong password accepted")
+	}
+	if request("POST", "/api/v1/login", `{"username":"missing","password":"a-long-test-password"}`, nil).Code != 401 {
+		t.Fatal("unknown account accepted")
+	}
+	login := `{"username":"admin","password":"a-long-test-password"}`
 	response := request("POST", "/api/v1/login", login, nil)
 	if response.Code != 200 {
 		t.Fatalf("login: %d %s", response.Code, response.Body)
@@ -134,8 +140,8 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("session cookie lacks protections")
 	}
-	if replay := request("POST", "/api/v1/login", login, nil); replay.Code != 401 {
-		t.Fatal("replayed TOTP accepted")
+	if again := request("POST", "/api/v1/login", login, nil); again.Code != 200 {
+		t.Fatal("password login unexpectedly requires a second factor")
 	}
 	user := core.User{Name: "alice", Enabled: true, ExpiresAt: time.Now().Add(time.Hour), QuotaBytes: 10000, GroupID: "default"}
 	raw, _ := json.Marshal(user)

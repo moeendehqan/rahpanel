@@ -45,7 +45,7 @@ func main() {
 		log.Fatal("Database initialization failed: ", e)
 	}
 	defer s.DB.Close()
-	if e = server.BootstrapAdmin(ctx, s, os.Getenv("ADMIN_USERNAME"), os.Getenv("ADMIN_PASSWORD"), os.Getenv("ADMIN_TOTP_SECRET")); e != nil {
+	if e = server.BootstrapAdmin(ctx, s, os.Getenv("ADMIN_USERNAME"), os.Getenv("ADMIN_PASSWORD")); e != nil {
 		log.Fatal(e)
 	}
 	var ca security.Authority

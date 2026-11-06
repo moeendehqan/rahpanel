@@ -14,3 +14,6 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS previous_serial text NOT NULL DEFAULT
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS previous_until timestamptz;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS client_cert bytea;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS client_key bytea;
+-- Keep legacy columns for compatibility, but erase the retired second-factor material.
+ALTER TABLE admins ALTER COLUMN totp SET DEFAULT ''::bytea;
+UPDATE admins SET totp=''::bytea,last_totp=0 WHERE octet_length(totp)>0 OR last_totp<>0;

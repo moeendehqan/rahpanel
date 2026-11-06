@@ -123,6 +123,6 @@ docker compose ps
 printf '\nServices are healthy. Open https://%s\n' "$domain"
 printf 'Point public DNS at this server and allow TCP 80, 443 and 9443. The agent endpoint must be DNS-only.\n'
 printf 'Caddy obtains public HTTPS once DNS resolves and ports are reachable. Service health does not verify public DNS/TLS.\n'
-printf 'Administrator password and authenticator seed: %s/bootstrap-admin.txt\n' "$project_dir"
+printf 'Administrator username and password: %s/bootstrap-admin.txt\n' "$project_dir"
 printf 'Read that file privately; then enter Cloudflare settings in the panel.\n'
 printf 'Manage: cd %q && sudo bash rah.sh status (or logs / backup)\n' "$project_dir"

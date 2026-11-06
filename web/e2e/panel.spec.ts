@@ -1,10 +1,8 @@
 import {test,expect} from '@playwright/test';
-import {createHmac} from 'node:crypto';
-function otp(secret:string){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const c of secret.toUpperCase())bits+=alphabet.indexOf(c).toString(2).padStart(5,'0');const key=Buffer.from(bits.match(/.{8}/g)!.map(b=>parseInt(b,2)));const counter=Buffer.alloc(8);counter.writeBigUInt64BE(BigInt(Math.floor(Date.now()/30000)));const hash=createHmac('sha1',key).update(counter).digest();const offset=hash[hash.length-1]&15;return ((hash.readUInt32BE(offset)&0x7fffffff)%1000000).toString().padStart(6,'0')}
 test('administrator creates, suspends and removes a user in the Persian panel',async({page})=>{
- test.skip(!process.env.E2E_ADMIN_PASSWORD||!process.env.E2E_TOTP_SECRET,'requires a running isolated panel and administrator secrets');
+ test.skip(!process.env.E2E_ADMIN_PASSWORD,'requires a running isolated panel and administrator secrets');
  await page.goto('/');await expect(page.getByRole('heading',{name:'به راه خوش آمدید'})).toBeVisible();await page.screenshot({path:'../.tools/screenshots/login.png',fullPage:true});
- await page.getByLabel('نام کاربری',{exact:true}).fill(process.env.E2E_ADMIN_USERNAME||'admin');await page.getByLabel('رمز عبور',{exact:true}).fill(process.env.E2E_ADMIN_PASSWORD!);await page.getByLabel('کد شش‌رقمی تأیید دومرحله‌ای').fill(otp(process.env.E2E_TOTP_SECRET!));await page.getByRole('button',{name:'ورود به پنل'}).click();
+ await page.getByLabel('نام کاربری',{exact:true}).fill(process.env.E2E_ADMIN_USERNAME||'admin');await page.getByLabel('رمز عبور',{exact:true}).fill(process.env.E2E_ADMIN_PASSWORD!);await expect(page.locator('input[name="code"]')).toHaveCount(0);await page.getByRole('button',{name:'ورود به پنل'}).click();
  await expect(page.getByRole('heading',{name:'دامنه و اتصال Cloudflare'})).toBeVisible();
  await expect(page.getByLabel('آدرس HTTPS پنل',{exact:true})).toHaveValue(process.env.E2E_BASE_URL||'http://127.0.0.1:8080');
  await expect(page.getByLabel('آدرس HTTPS پنل',{exact:true})).toHaveJSProperty('readOnly',true);

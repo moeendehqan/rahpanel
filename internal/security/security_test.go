@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"testing"
-	"time"
 )
 
 func TestNodeIdentityIsClientOnlyAndSigned(t *testing.T) {
@@ -35,12 +34,5 @@ func TestNodeIdentityIsClientOnlyAndSigned(t *testing.T) {
 	}
 	if _, e = c.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); e == nil {
 		t.Fatal("client identity usable as server")
-	}
-}
-func TestTOTPRejectsWrongCodes(t *testing.T) {
-	secret := "JBSWY3DPEHPK3PXP"
-	now := time.Unix(1700000000, 0)
-	if _, ok := CheckTOTP(secret, "000000", now); ok {
-		t.Fatal("wrong OTP accepted")
 	}
 }

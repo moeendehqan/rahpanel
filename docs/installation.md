@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/moeendehqan/rahpanel/main/bootstrap
 sudo cat /opt/rahpanel/bootstrap-admin.txt
 ```
 
-گذرواژه و seed را خصوصی بخوانید، seed یا URI را در authenticator اضافه کنید و به `https://panel.example.com` بروید. سپس تنظیمات Cloudflare را در پنل وارد کنید. نصب به ویرایش دستی فایل‌های سرویس، ساخت پایگاه داده یا نصب Go/Node نیاز ندارد.
+نام کاربری و گذرواژه را خصوصی بخوانید و به `https://panel.example.com` بروید. سپس تنظیمات Cloudflare را در پنل وارد کنید. نصب به ویرایش دستی فایل‌های سرویس، ساخت پایگاه داده یا نصب Go/Node نیاز ندارد.
 
 اگر DNS پنل پشت پروکسی Cloudflare است، برای ارتباط مستقیم عامل‌ها یک hostname جدا با DNS-only بسازید:
 
@@ -28,7 +28,7 @@ Bootstrap در پوشه `/opt/rahpanel` دریافت می‌شود. فرمان�
 1. ورودی دامنه را بررسی می‌کند. دامنه متناقض با نصب قبلی را رد می‌کند.
 2. اگر Docker وجود ندارد، روی Ubuntu/Debian و با root، مخزن رسمی apt و Docker Engine/Compose را نصب می‌کند. بسته‌های متداخل موجود خودکار حذف نمی‌شوند. مسیر نصب طبق [مستندات رسمی Docker](https://docs.docker.com/engine/install/ubuntu/) است.
 3. image `rahpanel:local` را شامل رابط ساخته‌شده، API، ابزار مدیریت، عامل‌های amd64/arm64 و Xray بررسی‌شده می‌سازد.
-4. تنها در نصب تازه، `.env` و `bootstrap-admin.txt` را با مجوز 0600 می‌سازد. کلید اصلی، رمز پایگاه داده، رمز مدیر و seed تصادفی‌اند.
+4. تنها در نصب تازه، `.env` و `bootstrap-admin.txt` را با مجوز 0600 می‌سازد. کلید اصلی، رمز پایگاه داده، رمز مدیر تصادفی‌اند.
 5. Compose را اعتبارسنجی و سرویس‌ها را با `--wait` اجرا می‌کند. پنل وقتی سالم است که پایگاه داده در دسترس باشد. Caddy پس از سلامت پنل اجرا می‌شود؛ ترتیب مبتنی بر سلامت طبق [مستندات Compose](https://docs.docker.com/compose/how-tos/startup-order/) است.
 
 ساخت image پیش از ایجاد secrets انجام می‌شود؛ برای شکست دانلود، نصب دوباره قابل اجرا است. در اجراهای بعد، `.env` و volumeها حفظ می‌شوند. اجرای هم‌زمان نصب با قفل `.install.lock` جلوگیری می‌شود. اگر سیستم به‌طور ناگهانی خاموش شد، پیش از حذف این پوشه مطمئن شوید نصب دیگری در حال اجرا نیست.

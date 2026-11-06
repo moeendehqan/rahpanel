@@ -3,15 +3,12 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/base32"
 	"fmt"
 	"github.com/rahpanel/rahpanel/internal/core"
-	"github.com/rahpanel/rahpanel/internal/security"
 	"github.com/rahpanel/rahpanel/internal/store"
 	"golang.org/x/crypto/bcrypt"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -50,7 +47,7 @@ func (l *loginLimiter) allow(key string) bool {
 	l.entries[key] = append(keep, now)
 	return true
 }
-func BootstrapAdmin(ctx context.Context, s *store.Store, username, password, totp string) error {
+func BootstrapAdmin(ctx context.Context, s *store.Store, username, password string) error {
 	var count int
 	if e := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM admins").Scan(&count); e != nil {
 		return e
@@ -61,19 +58,11 @@ func BootstrapAdmin(ctx context.Context, s *store.Store, username, password, tot
 	if username == "" || len(password) < 14 {
 		return fmt.Errorf("initial admin username and password (14+ characters) required")
 	}
-	decoded, e := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(totp))
-	if e != nil || len(decoded) < 20 {
-		return fmt.Errorf("ADMIN_TOTP_SECRET must be a base32 secret of at least 20 bytes")
-	}
 	hash, e := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if e != nil {
 		return e
 	}
-	secret, e := core.Seal(s.Key, totp)
-	if e != nil {
-		return e
-	}
-	_, e = s.DB.ExecContext(ctx, "INSERT INTO admins(id,username,password,totp) VALUES($1,$2,$3,$4)", core.ID(), username, hash, secret)
+	_, e = s.DB.ExecContext(ctx, "INSERT INTO admins(id,username,password) VALUES($1,$2,$3)", core.ID(), username, hash)
 	return e
 }
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +74,6 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
-		Code     string `json:"code"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -95,17 +83,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	var hash, encrypted []byte
-	var last int64
-	e := s.Store.DB.QueryRowContext(r.Context(), "SELECT id,password,totp,last_totp FROM admins WHERE username=$1", body.Username).Scan(&id, &hash, &encrypted, &last)
+	var hash []byte
+	e := s.Store.DB.QueryRowContext(r.Context(), "SELECT id,password FROM admins WHERE username=$1", body.Username).Scan(&id, &hash)
 	if e != nil {
 		hash = []byte("$2a$12$94Q9kgCfBMZo72vhG9pY5eMzGhZRw75aHHJ97TJkHU5zhhG3Us1xq")
 	}
 	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(body.Password))
-	secret, se := core.Open(s.Store.Key, encrypted)
-	counter, ok := security.CheckTOTP(secret, body.Code, time.Now())
-	if e != nil || passwordErr != nil || se != nil || !ok || counter <= last {
-		problem(w, 401, "Invalid credentials or already-used OTP")
+	if e != nil || passwordErr != nil {
+		problem(w, 401, "Invalid credentials")
 		return
 	}
 	tx, e := s.Store.DB.BeginTx(r.Context(), nil)
@@ -114,16 +99,6 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	result, e := tx.ExecContext(r.Context(), "UPDATE admins SET last_totp=$2 WHERE id=$1 AND last_totp<$2", id, counter)
-	if e != nil {
-		problem(w, 503, "Login unavailable")
-		return
-	}
-	affected, _ := result.RowsAffected()
-	if affected != 1 {
-		problem(w, 401, "OTP already used")
-		return
-	}
 	token := core.RandomToken()
 	expires := time.Now().Add(8 * time.Hour)
 	_, e = tx.ExecContext(r.Context(), "INSERT INTO sessions(hash,admin_id,expires_at) VALUES($1,$2,$3)", store.Hash(token), id, expires)

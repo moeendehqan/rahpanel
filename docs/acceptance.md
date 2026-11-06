@@ -2,7 +2,7 @@
 
 ## Local verification
 
-Run `go test ./...`, `go vet ./...`, frontend tests and production build. With an isolated PostgreSQL database, test concurrent duplicate reports, multi-node aggregation, process-run changes, admin login/TOTP replay rejection, user suspension and provider secret redaction. `RUN_CAPACITY_TEST=1` enables the 1,000-user/20-node control-plane exercise.
+Run `go test ./...`, `go vet ./...`, frontend tests and production build. With an isolated PostgreSQL database, test concurrent duplicate reports, multi-node aggregation, process-run changes, password-only admin login, wrong-password rejection, user suspension and provider secret redaction. `RUN_CAPACITY_TEST=1` enables the 1,000-user/20-node control-plane exercise.
 
 Lease tests use boot uptime, include reboot and deadline boundaries, and bound expiration by server time independently of node wall-clock skew. A fatal accounting failure must remain quarantined across reconciler restart.
 

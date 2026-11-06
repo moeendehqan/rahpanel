@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -15,7 +14,6 @@ import (
 	"github.com/rahpanel/rahpanel/internal/provision"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -66,17 +64,13 @@ func initDeployment() {
 	}
 	master := make([]byte, 32)
 	mustRead(master)
-	seed := make([]byte, 20)
-	mustRead(seed)
-	totp := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(seed)
 	password := core.RandomToken()
 	dbpass := core.RandomToken()
-	content := fmt.Sprintf("PANEL_HOST=%s\nPUBLIC_URL=https://%s\nAGENT_URL=https://%s:9443\nPOSTGRES_PASSWORD=%s\nDATABASE_URL=postgres://rah:%s@db:5432/rah?sslmode=disable\nMASTER_KEY=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\nADMIN_TOTP_SECRET=%s\n", *domain, *domain, *agent, dbpass, dbpass, base64.StdEncoding.EncodeToString(master), password, totp)
+	content := fmt.Sprintf("PANEL_HOST=%s\nPUBLIC_URL=https://%s\nAGENT_URL=https://%s:9443\nPOSTGRES_PASSWORD=%s\nDATABASE_URL=postgres://rah:%s@db:5432/rah?sslmode=disable\nMASTER_KEY=%s\nADMIN_USERNAME=admin\nADMIN_PASSWORD=%s\n", *domain, *domain, *agent, dbpass, dbpass, base64.StdEncoding.EncodeToString(master), password)
 	must(os.WriteFile(path, []byte(content), 0600))
-	uri := "otpauth://totp/" + url.PathEscape("Rah Panel:admin") + "?secret=" + totp + "&issuer=Rah%20Panel"
-	instructions := "Username: admin\nPassword: " + password + "\nTOTP seed: " + totp + "\nAuthenticator URI: " + uri + "\nKeep this file offline. Initial administrator is created only when the database is empty.\n"
+	instructions := "Username: admin\nPassword: " + password + "\nKeep this file offline. Initial administrator is created only when the database is empty.\n"
 	must(os.WriteFile(filepath.Join(*directory, "bootstrap-admin.txt"), []byte(instructions), 0600))
-	fmt.Println("Created .env and bootstrap-admin.txt. Import the TOTP seed into your authenticator before logging in.")
+	fmt.Println("Created .env and bootstrap-admin.txt. Use the administrator username and password to log in.")
 }
 func mustRead(b []byte) { _, e := rand.Read(b); must(e) }
 func fetch(ctx context.Context, u string) ([]byte, error) {

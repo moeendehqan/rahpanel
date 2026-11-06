@@ -5,7 +5,7 @@
 ## چه چیزی پیاده‌سازی شده است؟
 
 - مدیریت کاربران، گروه نودها، انقضا، سهمیه، تعلیق و اشتراک قابل ابطال.
-- ورود مدیر با bcrypt، TOTP یک‌بارمصرف و نشست HttpOnly/SameSite.
+- ورود مدیر با bcrypt و نشست HttpOnly/SameSite.
 - ثبت نود و نصب worker با SSH و تأیید اثر انگشت میزبان؛ رمز/کلید SSH در DB یا صف پایدار ذخیره نمی‌شود.
 - Cloudflare DNS-only، دریافت و تمدید گواهی DNS-01 در پنل، هویت mTLS مستقل برای نود.
 - سه قالب: VLESS/REALITY روی 443، VLESS/WS/TLS روی 8443 و Trojan/TLS روی 2053.
@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/moeendehqan/rahpanel/main/bootstrap
 sudo cat /opt/rahpanel/bootstrap-admin.txt
 ```
 
-پس از ورود، پنل خودکار مرحله تنظیم Cloudflare را باز می‌کند. آدرس‌های پنل و عامل از نصب پر شده‌اند؛ بعد از ذخیره، افزودن نود، SSH، نصب و ساخت کاربران را در پنل ادامه دهید. پیش از بازکردن پنل، seed موجود در فایل ورود را در authenticator اضافه کنید.
+پس از ورود، پنل خودکار مرحله تنظیم Cloudflare را باز می‌کند. آدرس‌های پنل و عامل از نصب پر شده‌اند؛ بعد از ذخیره، افزودن نود، SSH، نصب و ساخت کاربران را در پنل ادامه دهید.
 
 برای دریافت نسخه مشخص از `--ref TAG` استفاده کنید. روی نصب موجود، اجرای دوباره bootstrap سورس و secrets را بازنشانی نمی‌کند. مخزن: [moeendehqan/rahpanel](https://github.com/moeendehqan/rahpanel).
 
@@ -42,7 +42,7 @@ sudo bash install.sh --domain panel.example.com
 
 قبل از نصب، DNS دامنه را به IP سرور وصل و پورت‌های TCP 80، 443 و 9443 را باز کنید. Caddy گواهی HTTPS عمومی را خودکار می‌گیرد. بررسی سلامت سرویس‌ها جای آزمون دسترسی عمومی دامنه و گواهی را نمی‌گیرد. endpoint عامل روی 9443 باید DNS-only و مستقیم باشد؛ برای hostname جدا از `--agent-host agents.example.com` استفاده کنید. پنل و نودها را روی ماشین‌های جدا نصب کنید، چون هر دو پورت 443 لازم دارند.
 
-اطلاعات ورود و seed تأیید دومرحله‌ای در `bootstrap-admin.txt` ذخیره می‌شوند؛ با `sudo cat bootstrap-admin.txt` آن را خصوصی بخوانید و seed را در authenticator وارد کنید. رمزها در خروجی نصب چاپ نمی‌شوند. فایل را امن و آفلاین نگه دارید. شناسه مدیر فقط در اولین راه‌اندازی DB ساخته می‌شود. کلید `MASTER_KEY` در `.env` را همراه پشتیبان و جدا از آن نگهداری کنید؛ تعویض یا گم‌کردن آن داده‌های رمزگذاری‌شده را غیرقابل‌بازیابی می‌کند.
+نام کاربری و رمز عبور در `bootstrap-admin.txt` ذخیره می‌شوند؛ با `sudo cat bootstrap-admin.txt` آن را خصوصی بخوانید. رمزها در خروجی نصب چاپ نمی‌شوند. فایل را امن و آفلاین نگه دارید. شناسه مدیر فقط در اولین راه‌اندازی DB ساخته می‌شود. کلید `MASTER_KEY` در `.env` را همراه پشتیبان و جدا از آن نگهداری کنید؛ تعویض یا گم‌کردن آن داده‌های رمزگذاری‌شده را غیرقابل‌بازیابی می‌کند.
 
 اجرای دوباره `sudo bash install.sh` تنظیمات و volumeهای قبلی را نگه می‌دارد. اگر Docker و Compose از قبل آماده‌اند، `bash install.sh --domain panel.example.com --no-install-docker` هم کار می‌کند. نصب‌کننده نرم‌افزار کانتینر موجود را خودکار حذف نمی‌کند. [جزئیات نصب و رفع خطا](docs/installation.md).
 
@@ -113,6 +113,6 @@ TEST_DATABASE_URL='postgres://rah:test@localhost:5432/rah_test?sslmode=disable' 
 RUN_CAPACITY_TEST=1 TEST_DATABASE_URL='postgres://rah:test@localhost:5432/rah_test?sslmode=disable' go test ./internal/store -run TestControlPlaneCapacity -v
 ```
 
-پنل برای توسعه متغیرهای `DATABASE_URL`، `MASTER_KEY`، `ADMIN_USERNAME`، `ADMIN_PASSWORD`، `ADMIN_TOTP_SECRET`، `PUBLIC_URL` و `AGENT_URL` را از محیط می‌گیرد. برای HTTP صرفاً محلی `INSECURE_DEV=true` لازم است. فایل `.env` در اجرای مستقیم Go خودکار بارگذاری نمی‌شود؛ Compose آن را می‌خواند. در dev با Vite، `PUBLIC_URL` را برابر origin آن قرار دهید تا بررسی Origin معتبر بماند.
+پنل برای توسعه متغیرهای `DATABASE_URL`، `MASTER_KEY`، `ADMIN_USERNAME`، `ADMIN_PASSWORD`، `PUBLIC_URL` و `AGENT_URL` را از محیط می‌گیرد. برای HTTP صرفاً محلی `INSECURE_DEV=true` لازم است. فایل `.env` در اجرای مستقیم Go خودکار بارگذاری نمی‌شود؛ Compose آن را می‌خواند. در dev با Vite، `PUBLIC_URL` را برابر origin آن قرار دهید تا بررسی Origin معتبر بماند.
 
 این پروژه هنوز به آزمون نصب روی دو Ubuntu واقعی، Cloudflare/ACME واقعی، کلاینت‌های مرجع، بازیابی عملی و شبکه ایران نیاز دارد. تست‌های محلی جای آن‌ها را نمی‌گیرند؛ وضعیت دقیق در [acceptance.md](docs/acceptance.md) ثبت می‌شود. هیچ تضمین غیرقابل‌شناسایی بودن یا اتصال هنگام قطع کامل مسیرهای خارجی ارائه نمی‌شود.

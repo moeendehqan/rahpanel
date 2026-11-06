@@ -5,7 +5,7 @@ React/TypeScript, Ubuntu 24.04 SSH provisioning, Cloudflare DNS-01, Xray,
 30-second usage reconciliation and five-minute fail-closed leases.
 
 ## Tasks
-- [x] Control plane, migrations, password/TOTP sessions, users/groups/nodes.
+- [x] Control plane, migrations, password sessions, users/groups/nodes.
 - [x] Pinned SSH provisioning, durable job metadata, Cloudflare and ACME.
 - [x] Xray configuration, subscriptions, authenticated probes, credentials.
 - [x] Agent reconciliation, usage outbox, local expiry, independent watchdog.
