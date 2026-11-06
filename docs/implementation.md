@@ -34,8 +34,10 @@ React/TypeScript, Ubuntu 24.04 SSH provisioning, Cloudflare DNS-01, Xray,
   prior backup, single-transaction restore and restarting the panel on failure.
 - Go tests/vet and a real local HTTP healthcheck passed; the Linux rahctl binary cross-compiled.
 - Compose validated against the official Compose specification JSON Schema; workflow YAML parsed.
-- Added a CI job that builds the real image, starts all services, and checks DB persistence across
-  recreation. This CI job has not been run here; there is no local Docker daemon.
+- GitHub Actions run 42213101056 passed both jobs: Go race/vet, frontend tests/build and shell
+  contracts; real Docker image build, healthy full-stack startup and DB persistence across recreation.
+- Public raw bootstrap download matched the source checksum. A real GitHub clone and bootstrap
+  handoff to the installer also passed (Docker was simulated for that local handoff).
 
 ## Rulings
 
