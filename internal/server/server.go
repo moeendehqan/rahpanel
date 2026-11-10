@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rahpanel/rahpanel/internal/core"
 	"github.com/rahpanel/rahpanel/internal/provision"
 	"github.com/rahpanel/rahpanel/internal/store"
@@ -278,18 +279,80 @@ func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) updateNode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool   `json:"enabled"`
+		Name    *string `json:"name"`
+		Host    *string `json:"host"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	_, e := s.Store.DB.ExecContext(r.Context(), "UPDATE nodes SET enabled=$2 WHERE id=$1", r.PathValue("id"), body.Enabled)
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		if name == "" {
+			problem(w, 400, "Name required")
+			return
+		}
+		body.Name = &name
+	}
+	if body.Host != nil {
+		host := strings.TrimSpace(*body.Host)
+		if net.ParseIP(host) == nil {
+			problem(w, 400, "آدرس IP معتبر وارد کنید.")
+			return
+		}
+		body.Host = &host
+	}
+	if body.Enabled == nil && body.Name == nil && body.Host == nil {
+		problem(w, 400, "Provide a name, IP address or enabled status")
+		return
+	}
+	ctx, id := r.Context(), r.PathValue("id")
+	tx, e := s.Store.DB.BeginTx(ctx, nil)
 	if e != nil {
 		problem(w, 500, "Cannot update node")
 		return
 	}
-	s.auditAction(r, "node.update", r.PathValue("id"))
-	write(w, 200, map[string]bool{"ok": true})
+	defer tx.Rollback()
+	var host string
+	e = tx.QueryRowContext(ctx, "SELECT host FROM nodes WHERE id=$1 FOR UPDATE", id).Scan(&host)
+	if e == sql.ErrNoRows {
+		problem(w, 404, "Node not found")
+		return
+	}
+	if e != nil {
+		problem(w, 500, "Cannot update node")
+		return
+	}
+	hostChanged := body.Host != nil && *body.Host != host
+	if hostChanged {
+		var installing bool
+		e = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM jobs WHERE node_id=$1 AND status IN ('queued','running'))", id).Scan(&installing)
+		if e != nil {
+			problem(w, 500, "Cannot update node")
+			return
+		}
+		if installing {
+			problem(w, 409, "پس از پایان عملیات نصب، دوباره آدرس IP را تغییر دهید.")
+			return
+		}
+	}
+	_, e = tx.ExecContext(ctx, `UPDATE nodes SET
+		enabled=COALESCE($2, enabled), name=COALESCE($3, name), host=COALESCE($4, host),
+		ready=CASE WHEN $5 THEN false ELSE ready END,
+		verified=CASE WHEN $5 THEN '[]'::jsonb ELSE verified END,
+		last_seen=CASE WHEN $5 THEN NULL ELSE last_seen END
+		WHERE id=$1`, id, body.Enabled, body.Name, body.Host, hostChanged)
+	var pgErr *pgconn.PgError
+	if errors.As(e, &pgErr) && pgErr.Code == "23505" {
+		problem(w, 409, "این آدرس IP برای سرور دیگری ثبت شده است.")
+		return
+	}
+	if e != nil || tx.Commit() != nil {
+		problem(w, 500, "Cannot update node")
+		return
+	}
+	s.auditAction(r, "node.update", id)
+	write(w, 200, map[string]bool{"ok": true, "host_changed": hostChanged})
 }
 func (s *Server) fingerprint(w http.ResponseWriter, r *http.Request) {
 	var c struct {

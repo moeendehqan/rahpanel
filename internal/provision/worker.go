@@ -59,6 +59,10 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Node not found")
 		return
 	}
+	if n.Host != r.SSH.Host {
+		fail("Node IP changed; start installation again using the new address")
+		return
+	}
 	var cfg Settings
 	if e = w.Store.GetSetting(ctx, "provider", &cfg); e != nil || cfg.Validate() != nil {
 		fail("Configure domain, Cloudflare and panel URLs first")

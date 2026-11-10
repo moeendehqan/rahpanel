@@ -234,6 +234,31 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 			t.Fatal("Cloudflare test changed stored settings", err)
 		}
 	})
+	t.Run("changing node IP invalidates connection verification", func(t *testing.T) {
+		res := request("POST", "/api/v1/nodes", `{"name":"old name","host":"192.0.2.20","group_id":"default"}`, cookie)
+		if res.Code != 201 {
+			t.Fatalf("create node: %d %s", res.Code, res.Body)
+		}
+		var n core.Node
+		if err := json.Unmarshal(res.Body.Bytes(), &n); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(`UPDATE nodes SET ready=true, verified='["reality"]', last_seen=now() WHERE id=$1`, n.ID); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/v1/nodes/" + n.ID
+		if got := request("PUT", path, `{"host":"not-an-ip"}`, cookie); got.Code != 400 {
+			t.Fatalf("invalid IP: %d %s", got.Code, got.Body)
+		}
+		if got := request("PUT", path, `{"name":"new name","host":"192.0.2.21"}`, cookie); got.Code != 200 {
+			t.Fatalf("edit node: %d %s", got.Code, got.Body)
+		}
+		updated, err := s.Node(context.Background(), n.ID)
+		if err != nil || updated.Host != "192.0.2.21" || updated.Name != "new name" ||
+			updated.Ready || len(updated.Verified) != 0 || !updated.Enabled {
+			t.Fatalf("unexpected node after IP change: %+v, %v", updated, err)
+		}
+	})
 	t.Run("shared host creation and installation port locking", func(t *testing.T) {
 		res := request("POST", "/api/v1/nodes", `{"name":"panel node","host":"192.0.2.10","group_id":"default","shared_host":true}`, cookie)
 		if res.Code != 201 {
