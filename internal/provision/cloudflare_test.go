@@ -16,9 +16,14 @@ func TestDNSWriteProbe(t *testing.T) {
 		readStatus, createStatus, deleteStatus int
 		methods                                []string
 		cancelDuringCreate                     bool
+		recoverRead                            bool
 	}{
 		{name: "success after browser disconnects", zone: "example.com", methods: []string{"GET", "POST", "DELETE"}, cancelDuringCreate: true},
 		{name: "invalid token", readStatus: 403, wantError: "خواندن Zone", methods: []string{"GET"}},
+		{name: "zone not found", readStatus: 404, wantError: "پیدا نشد", methods: []string{"GET"}},
+		{name: "rate limited", readStatus: 429, wantError: "محدود کرده است", methods: []string{"GET"}},
+		{name: "temporary zone failure", zone: "example.com", readStatus: 502, recoverRead: true, methods: []string{"GET", "GET", "POST", "DELETE"}},
+		{name: "repeated zone timeout", readStatus: 408, wantError: "پس از دو تلاش", methods: []string{"GET", "GET"}},
 		{name: "unrelated zone", zone: "ample.com", wantError: "دامنهٔ پایه", methods: []string{"GET"}},
 		{name: "write rejected", zone: "example.com", createStatus: 403, wantError: "ساخت رکورد TXT را رد کرد", methods: []string{"GET", "POST"}},
 		{name: "write outcome unknown", zone: "example.com", createStatus: 502, wantError: "ساخت رکورد TXT تأیید نشد", methods: []string{"GET", "POST"}},
@@ -40,6 +45,14 @@ func TestDNSWriteProbe(t *testing.T) {
 				switch r.Method {
 				case "GET":
 					status, path, result = tc.readStatus, "/zones/zone", map[string]string{"name": tc.zone}
+					if tc.recoverRead && len(methods) == 2 {
+						status = 0
+					}
+					if status == http.StatusBadGateway {
+						w.WriteHeader(status)
+						w.Write([]byte("<html>Bad gateway</html>"))
+						return
+					}
 				case "POST":
 					if tc.cancelDuringCreate {
 						cancel()

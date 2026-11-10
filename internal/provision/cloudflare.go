@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,6 +31,11 @@ type record struct {
 }
 
 type cloudflareRejection int
+
+var (
+	errCloudflareConnection = errors.New("Cloudflare request failed")
+	errCloudflareTimeout    = errors.New("Cloudflare request timed out")
+)
 
 func (e cloudflareRejection) Error() string {
 	return fmt.Sprintf("Cloudflare rejected request (HTTP %d); verify token permissions and zone", e)
@@ -60,17 +66,27 @@ func (d DNS) call(ctx context.Context, method, path string, body any, out any) e
 	}
 	res, e := client.Do(req)
 	if e != nil {
-		return fmt.Errorf("Cloudflare request failed")
+		var networkError net.Error
+		if errors.As(e, &networkError) && networkError.Timeout() {
+			return errCloudflareTimeout
+		}
+		return errCloudflareConnection
 	}
 	defer res.Body.Close()
+	if res.StatusCode/100 != 2 {
+		return cloudflareRejection(res.StatusCode)
+	}
 	var response struct {
 		Success bool            `json:"success"`
 		Result  json.RawMessage `json:"result"`
 	}
 	if e = json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(&response); e != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errCloudflareTimeout
+		}
 		return fmt.Errorf("invalid Cloudflare response")
 	}
-	if res.StatusCode/100 != 2 || !response.Success {
+	if !response.Success {
 		return cloudflareRejection(res.StatusCode)
 	}
 	if out != nil {
@@ -79,18 +95,53 @@ func (d DNS) call(ctx context.Context, method, path string, body any, out any) e
 	return nil
 }
 
-// TestWrite verifies access to the zone and creates and removes one probe record.
-func (d DNS) TestWrite(ctx context.Context, domain string) error {
+func (d DNS) readZoneName(ctx context.Context) (string, error) {
 	var zone struct {
 		Name string `json:"name"`
 	}
-	readCtx, cancelRead := context.WithTimeout(ctx, 5*time.Second)
-	err := d.call(readCtx, "GET", "", nil, &zone)
-	cancelRead()
-	if err != nil || zone.Name == "" {
-		return fmt.Errorf("خواندن Zone در Cloudflare ناموفق بود. شناسهٔ Zone، دسترسی توکن و اتصال سرور را بررسی کنید")
+	for attempt := 0; ; attempt++ {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := d.call(readCtx, "GET", "", nil, &zone)
+		cancel()
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("تست Cloudflare لغو شد")
+		}
+		status, _ := err.(cloudflareRejection)
+		transient := err == errCloudflareTimeout || err == errCloudflareConnection ||
+			status == http.StatusRequestTimeout || status >= 500
+		if transient && attempt == 0 {
+			continue
+		}
+		switch {
+		case err == nil && zone.Name != "":
+			return zone.Name, nil
+		case err == errCloudflareTimeout || status == http.StatusRequestTimeout:
+			return "", fmt.Errorf("مهلت خواندن Zone در Cloudflare پس از دو تلاش تمام شد")
+		case err == errCloudflareConnection:
+			return "", fmt.Errorf("اتصال سرور پنل به Cloudflare پس از دو تلاش برقرار نشد")
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
+			return "", fmt.Errorf("Cloudflare توکن یا دسترسی خواندن Zone را رد کرد (HTTP %d)", status)
+		case status == http.StatusNotFound:
+			return "", fmt.Errorf("Zone در Cloudflare پیدا نشد (HTTP %d). شناسهٔ Zone را بررسی کنید", status)
+		case status == http.StatusTooManyRequests:
+			return "", fmt.Errorf("Cloudflare درخواست‌ها را محدود کرده است (HTTP %d). کمی بعد دوباره تست کنید", status)
+		case status >= 500:
+			return "", fmt.Errorf("Cloudflare هنگام خواندن Zone پس از دو تلاش خطای HTTP %d داد", status)
+		case status >= 300:
+			return "", fmt.Errorf("خواندن Zone در Cloudflare رد شد (HTTP %d)", status)
+		default:
+			return "", fmt.Errorf("پاسخ Cloudflare برای خواندن Zone معتبر نبود")
+		}
 	}
-	if domain != zone.Name && !strings.HasSuffix(domain, "."+zone.Name) {
+}
+
+// TestWrite verifies access to the zone and creates and removes one probe record.
+func (d DNS) TestWrite(ctx context.Context, domain string) error {
+	zone, err := d.readZoneName(ctx)
+	if err != nil {
+		return err
+	}
+	if domain != zone && !strings.HasSuffix(domain, "."+zone) {
 		return fmt.Errorf("دامنهٔ پایه در Zone انتخاب‌شده قرار ندارد")
 	}
 	if err := ctx.Err(); err != nil {
