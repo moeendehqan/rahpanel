@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type adminKey struct{}
@@ -161,8 +162,8 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if len(body.New) < 14 || len(body.New) > 72 || body.New == body.Current {
-		problem(w, 400, "Choose a different password between 14 and 72 bytes")
+	if utf8.RuneCountInString(body.New) < 6 || len(body.New) > 72 {
+		problem(w, 400, "Password must have at least 6 characters and at most 72 bytes")
 		return
 	}
 

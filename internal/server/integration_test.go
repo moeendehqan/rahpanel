@@ -287,9 +287,14 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	})
 	t.Run("change admin password", func(t *testing.T) {
 		const path = "/api/v1/me/password"
-		const change = `{"current_password":"a-long-test-password","new_password":"a-new-test-password"}`
+		const newPassword = "123456"
+		const change = `{"current_password":"a-long-test-password","new_password":"` + newPassword + `"}`
 		if w := request("PUT", path, change, nil); w.Code != 401 {
 			t.Fatalf("unauthenticated password change: %d", w.Code)
+		}
+		short := strings.Replace(change, newPassword, "12345", 1)
+		if w := request("PUT", path, short, cookie); w.Code != 400 {
+			t.Fatalf("five-digit password: %d", w.Code)
 		}
 		wrong := strings.Replace(change, "a-long-test-password", "incorrect", 1)
 		if w := request("PUT", path, wrong, cookie); w.Code != 400 {
@@ -308,7 +313,7 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 		if w := request("POST", "/api/v1/login", login, nil); w.Code != 401 {
 			t.Fatalf("old password login: %d", w.Code)
 		}
-		newLogin := strings.Replace(login, "a-long-test-password", "a-new-test-password", 1)
+		newLogin := strings.Replace(login, "a-long-test-password", newPassword, 1)
 		if w := request("POST", "/api/v1/login", newLogin, nil); w.Code != 200 {
 			t.Fatalf("new password login: %d %s", w.Code, w.Body)
 		}

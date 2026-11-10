@@ -30,9 +30,12 @@ function PasswordForm({username}:{username:string}){
    setError('رمز جدید و تکرار آن یکسان نیستند.');
    return;
   }
-  const length=new TextEncoder().encode(password).length;
-  if(length<14||length>72||current===password){
-   setError('رمزی متفاوت از رمز فعلی و با طول ۱۴ تا ۷۲ بایت انتخاب کنید.');
+  if([...password].length<6){
+   setError('رمز جدید باید حداقل ۶ کاراکتر داشته باشد.');
+   return;
+  }
+  if(new TextEncoder().encode(password).length>72){
+   setError('رمز جدید نباید بیشتر از ۷۲ بایت باشد.');
    return;
   }
   setBusy(true);
@@ -55,7 +58,7 @@ function PasswordForm({username}:{username:string}){
  }
  return <form className="card settings-form" onSubmit={submit}>
   <h2>تغییر رمز ورود ادمین</h2>
-  <p className="muted" id="password-hint">رمز جدید باید ۱۴ تا ۷۲ بایت باشد. پس از تغییر رمز، نشست‌های دیگر این حساب بسته می‌شوند.</p>
+  <p className="muted" id="password-hint">رمز جدید باید حداقل ۶ کاراکتر داشته باشد. پس از تغییر رمز، نشست‌های دیگر این حساب بسته می‌شوند.</p>
   <input hidden name="username" autoComplete="username" value={username} readOnly/>
   <div className="form-grid">
    <Field label="رمز فعلی"><input name="current_password" dir="ltr" type="password" autoComplete="current-password" disabled={busy} required/></Field>
