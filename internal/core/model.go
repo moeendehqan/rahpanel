@@ -37,6 +37,8 @@ type Node struct {
 	RealityPublic  string    `json:"reality_public"`
 	ShortID        string    `json:"short_id"`
 	WSPath         string    `json:"ws_path"`
+
+	RealityBehindNginx bool `json:"-"`
 }
 type Credential struct {
 	UserID   string `json:"user_id"`

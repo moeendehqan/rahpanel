@@ -109,7 +109,7 @@ func (s *Store) SaveUser(ctx context.Context, u core.User, create bool) error {
 	return nil
 }
 func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
-	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port,(client_serial<>'' OR ready) FROM nodes ORDER BY name`)
+	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port,reality_behind_nginx,(client_serial<>'' OR ready) FROM nodes ORDER BY name`)
 	if e != nil {
 		return nil, e
 	}
@@ -118,7 +118,7 @@ func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
 	for rows.Next() {
 		var n core.Node
 		var secret, verified []byte
-		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.PortsLocked); e != nil {
+		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.RealityBehindNginx, &n.PortsLocked); e != nil {
 			return nil, e
 		}
 		n.RealityPrivate, e = core.Open(s.Key, secret)

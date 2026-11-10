@@ -78,3 +78,28 @@ func TestPortsRejectConflictsAndProtectSharedPanelListeners(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNginxRealityKeepsPublicPort443(t *testing.T) {
+	n := Node{ID: "proxied", Host: "203.0.113.1", Ready: true, Verified: []string{"reality"}, RealityBehindNginx: true}
+	raw, err := BuildConfig(n, nil, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Inbounds []struct {
+			Tag, Listen string
+			Port        int
+		}
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	reality := config.Inbounds[1]
+	if reality.Tag != "reality" || reality.Listen != "127.0.0.1" || reality.Port != 2087 {
+		t.Fatal("REALITY must listen only on the local backend")
+	}
+	raw, err = base64.StdEncoding.DecodeString(Subscription([]Node{n}, []Credential{{NodeID: n.ID, UUID: "uuid"}}))
+	if err != nil || !strings.Contains(string(raw), "@203.0.113.1:443?") {
+		t.Fatalf("subscription must advertise public TCP 443: %s (%v)", raw, err)
+	}
+}

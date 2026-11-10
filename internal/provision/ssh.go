@@ -145,15 +145,30 @@ func agentBinary(arch string) ([]byte, error) {
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
 
 func preflightScript(n core.Node) (string, error) {
-	p := n.EffectivePorts()
+	p := n.ListenerPorts()
 	if e := p.Validate(n.SharedHost); e != nil {
+		if n.RealityBehindNginx {
+			return "", fmt.Errorf("Nginx TCP 443 sharing requires TCP %d for the local REALITY backend", p.Reality)
+		}
 		return "", e
 	}
 	ports := []string{}
 	for _, port := range p.All() {
 		ports = append(ports, strconv.Itoa(port))
 	}
-	return "node_id=" + shellQuote(n.ID) + "\nports=" + shellQuote(strings.Join(ports, " ")) + "\n" + preflight, nil
+	nginxCandidate := !n.SharedHost && !n.PortsLocked && n.EffectivePorts().Reality == 443
+	if n.RealityBehindNginx {
+		for _, port := range p.All() {
+			if port == nginxSitePort {
+				return "", fmt.Errorf("Nginx needs TCP %d for local HTTPS", nginxSitePort)
+			}
+		}
+		ports = append(ports, strconv.Itoa(nginxSitePort))
+	}
+	return "node_id=" + shellQuote(n.ID) + "\nports=" + shellQuote(strings.Join(ports, " ")) +
+		"\nnginx_candidate=" + strconv.FormatBool(nginxCandidate) +
+		"\nnginx_backend=" + strconv.FormatBool(n.RealityBehindNginx) +
+		"\nnginx_site_port=" + strconv.Itoa(nginxSitePort) + "\n" + preflight, nil
 }
 
 const preflight = `
@@ -184,6 +199,19 @@ if [ "$owned" = 1 ]; then pid=$(systemctl show rah-xray.service --property=MainP
 for port in $ports; do
  listeners=$(ss -H -ltnp "sport = :$port")
  if [ -n "$listeners" ]; then
+  if { { "$nginx_candidate" && [ "$port" = 443 ]; } || { "$nginx_backend" && [ "$port" = "$nginx_site_port" ]; }; } &&
+     systemctl is-active --quiet nginx.service &&
+     printf '%s\n' "$listeners" | awk '
+      { line=$0; found=0;
+        while(match(line,/\("[^"]+",pid=[0-9]+,fd=[0-9]+\)/)) {
+         if(substr(line,RSTART,8)!="(\"nginx\"") exit 1;
+         found=1; line=substr(line,RSTART+RLENGTH);
+        }
+        if(!found) exit 1;
+      }'; then
+   if [ "$port" = 443 ]; then echo NGINX_REALITY_443; fi
+   continue
+  fi
   if [ "$owned" != 1 ] || [ -z "$pid" ] || [ "$pid" = 0 ]; then echo "PORT_CONFLICT:$port"; exit 1; fi
   if ! printf '%s\n' "$listeners" | awk -v expected="$pid" '
    { line=$0; found=0;

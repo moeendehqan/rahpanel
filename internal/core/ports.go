@@ -31,8 +31,18 @@ func (p NodePorts) WithDefaults(shared bool) NodePorts {
 	return p
 }
 func (n Node) EffectivePorts() NodePorts { return n.Ports.WithDefaults(n.SharedHost) }
-func (p NodePorts) Public() []int        { return []int{p.Reality, p.WebSocket, p.Trojan} }
-func (p NodePorts) All() []int           { return []int{p.Reality, p.WebSocket, p.Trojan, p.Stats} }
+
+const RealityNginxBackend = 2087
+
+func (n Node) ListenerPorts() NodePorts {
+	p := n.EffectivePorts()
+	if n.RealityBehindNginx {
+		p.Reality = RealityNginxBackend
+	}
+	return p
+}
+func (p NodePorts) Public() []int { return []int{p.Reality, p.WebSocket, p.Trojan} }
+func (p NodePorts) All() []int    { return []int{p.Reality, p.WebSocket, p.Trojan, p.Stats} }
 func (p NodePorts) Validate(shared bool) error {
 	seen := map[int]bool{}
 	for _, port := range p.All() {

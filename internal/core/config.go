@@ -14,7 +14,7 @@ import (
 
 // BuildConfig deliberately avoids sniffing and access logs: no destination history.
 func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byte, error) {
-	ports := n.EffectivePorts()
+	ports := n.ListenerPorts()
 	if err := ports.Validate(n.SharedHost); err != nil {
 		return nil, err
 	}
@@ -44,7 +44,11 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 		if protocol == "vless" {
 			settings["decryption"] = "none"
 		}
-		return map[string]any{"tag": tag, "listen": "0.0.0.0", "port": port, "protocol": protocol, "settings": settings, "streamSettings": stream}
+		listen := "0.0.0.0"
+		if tag == "reality" && n.RealityBehindNginx {
+			listen = "127.0.0.1"
+		}
+		return map[string]any{"tag": tag, "listen": listen, "port": port, "protocol": protocol, "settings": settings, "streamSettings": stream}
 	}
 	cfg := map[string]any{
 		"log":    map[string]any{"loglevel": "warning", "access": "none"},

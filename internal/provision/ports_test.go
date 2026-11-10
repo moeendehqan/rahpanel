@@ -19,13 +19,18 @@ func TestPreflightProtectsOtherServicesOnSharedAndManagedHosts(t *testing.T) {
 			t.Skip("requires bash")
 		}
 	}
-	for _, tc := range []struct{ name, managed, listeners, want string }{
-		{"nginx443isnotclaimed", "", "443=999", ""},
-		{"foreignselectedport", "", "8443=999", "PORT_CONFLICT:8443"},
-		{"ownreinstall", "node-test", "2087=321;8443=321", ""},
-		{"foreignportonmanagedhost", "node-test", "8443=999", "PORT_CONFLICT:8443"},
-		{"mixedowners", "node-test", "2087=321;2087=999", "PORT_CONFLICT:2087"},
-		{"differentnodeinstallation", "other-node", "", "MANAGED_NODE_MISMATCH"},
+	for _, tc := range []struct {
+		name, managed, listeners, marker, want string
+		shared                                 bool
+	}{
+		{"nginx443isnotclaimed", "", "443=999", "", "", true},
+		{"nginx443canbeshared", "", "443=nginx:999", "NGINX_REALITY_443", "", false},
+		{"mixed443owners", "", "443=nginx:999;443=321", "", "PORT_CONFLICT:443", false},
+		{"foreignselectedport", "", "8443=999", "", "PORT_CONFLICT:8443", true},
+		{"ownreinstall", "node-test", "2087=321;8443=321", "", "", true},
+		{"foreignportonmanagedhost", "node-test", "8443=999", "", "PORT_CONFLICT:8443", true},
+		{"mixedowners", "node-test", "2087=321;2087=999", "", "PORT_CONFLICT:2087", true},
+		{"differentnodeinstallation", "other-node", "", "", "MANAGED_NODE_MISMATCH", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -42,7 +47,9 @@ func TestPreflightProtectsOtherServicesOnSharedAndManagedHosts(t *testing.T) {
 				"systemctl": "echo 321\n",
 				"ss": `for entry in ${FAKE_LISTENERS//;/ }; do
  port=${entry%%=*}; pid=${entry#*=}
- if [[ "$*" == *":$port" ]]; then printf 'LISTEN 0 511 0.0.0.0:%s 0.0.0.0:* users:(("xray",pid=%s,fd=3))\n' "$port" "$pid"; fi
+ name=xray
+ if [[ "$pid" == nginx:* ]]; then name=nginx; pid=${pid#*:}; fi
+ if [[ "$*" == *":$port" ]]; then printf 'LISTEN 0 511 0.0.0.0:%s 0.0.0.0:* users:(("%s",pid=%s,fd=3))\n' "$port" "$name" "$pid"; fi
 done
 exit 0
 `,
@@ -52,7 +59,7 @@ exit 0
 					t.Fatal(err)
 				}
 			}
-			script, err := preflightScript(core.Node{ID: "node-test", SharedHost: true})
+			script, err := preflightScript(core.Node{ID: "node-test", SharedHost: tc.shared})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,6 +79,9 @@ exit 0
 			if tc.want == "" {
 				if err != nil {
 					t.Fatalf("unexpected rejection: %v %s", err, out)
+				}
+				if tc.marker != "" && !strings.Contains(string(out), tc.marker) {
+					t.Fatalf("missing marker %s: %s", tc.marker, out)
 				}
 			} else if err == nil || !strings.Contains(string(out), tc.want) {
 				t.Fatalf("missing protected conflict %s: %v %s", tc.want, err, out)

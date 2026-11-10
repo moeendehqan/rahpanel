@@ -82,6 +82,15 @@ func (w *Worker) run(parent context.Context, r Request) {
 		return
 	}
 	pre, e := remote(client, script)
+	if e == nil && !n.RealityBehindNginx && strings.Contains(string(pre), "NGINX_REALITY_443\n") {
+		n.RealityBehindNginx = true
+		script, e = preflightScript(n)
+		if e != nil {
+			fail(e.Error())
+			return
+		}
+		pre, e = remote(client, script)
+	}
 	if e != nil {
 		for _, line := range strings.Split(string(pre), "\n") {
 			line = strings.TrimSpace(line)
@@ -99,6 +108,26 @@ func (w *Worker) run(parent context.Context, r Request) {
 		}
 		fail("Preflight failed: Ubuntu 24.04, sudo access, free ports and disk are required")
 		return
+	}
+	configureNginx := func(mode string) error {
+		script, err := nginxRealityScript(n, mode)
+		if err != nil {
+			return err
+		}
+		out, err := remote(client, script)
+		if err == nil {
+			return nil
+		}
+		if message := strings.TrimSpace(string(out)); strings.HasPrefix(message, "Nginx: ") {
+			return fmt.Errorf("%s", message)
+		}
+		return fmt.Errorf("could not configure Nginx to share TCP 443 with REALITY")
+	}
+	if n.RealityBehindNginx {
+		if err := configureNginx("check"); err != nil {
+			fail(err.Error())
+			return
+		}
 	}
 	arch := "amd64"
 	if strings.Contains(string(pre), "aarch64") {
@@ -174,7 +203,7 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Cannot protect node identity")
 		return
 	}
-	if _, e = w.Store.DB.ExecContext(ctx, "UPDATE nodes SET client_serial=$2,client_cert=$3,client_key=$4,previous_serial='',previous_until=NULL,ready=false,verified='[]' WHERE id=$1", n.ID, serial, crt, sealedClientKey); e != nil {
+	if _, e = w.Store.DB.ExecContext(ctx, "UPDATE nodes SET client_serial=$2,client_cert=$3,client_key=$4,reality_behind_nginx=$5,previous_serial='',previous_until=NULL,ready=false,verified='[]' WHERE id=$1", n.ID, serial, crt, sealedClientKey, n.RealityBehindNginx); e != nil {
 		fail("Cannot activate node identity")
 		return
 	}
@@ -186,6 +215,13 @@ func (w *Worker) run(parent context.Context, r Request) {
 	if _, e = remote(client, script); e != nil {
 		fail("Remote installation failed; retry with SSH credentials after correcting host prerequisites")
 		return
+	}
+	if n.RealityBehindNginx {
+		update("nginx")
+		if err := configureNginx("apply"); err != nil {
+			fail(err.Error())
+			return
+		}
 	}
 	update("verify")
 	verified := []string{}
