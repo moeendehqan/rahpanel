@@ -11,6 +11,7 @@ import (
 	"github.com/rahpanel/rahpanel/internal/provision"
 	"github.com/rahpanel/rahpanel/internal/security"
 	"github.com/rahpanel/rahpanel/internal/store"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +20,12 @@ import (
 	"testing"
 	"time"
 )
+
+type cloudflareTestTransport func(*http.Request) (*http.Response, error)
+
+func (f cloudflareTestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -178,6 +185,55 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	if !strings.Contains(res.Body.String(), `"configured":true`) {
 		t.Fatal("completed setup not reported")
 	}
+	t.Run("Cloudflare test uses form inputs without saving", func(t *testing.T) {
+		const path = "/api/v1/settings/cloudflare/test"
+		const body = `{"domain":"draft.example.com","zone_id":"draft-zone","cloudflare_token":"new-token"}`
+		if got := request("POST", path, body, nil); got.Code != 401 {
+			t.Fatalf("guest got %d: %s", got.Code, got.Body)
+		}
+		if _, err := s.DB.Exec("UPDATE admins SET role='viewer' WHERE username='admin'"); err != nil {
+			t.Fatal(err)
+		}
+		viewerResponse := request("POST", path, body, cookie)
+		if _, err := s.DB.Exec("UPDATE admins SET role='admin' WHERE username='admin'"); err != nil {
+			t.Fatal(err)
+		}
+		if viewerResponse.Code != 403 {
+			t.Fatalf("viewer got %d: %s", viewerResponse.Code, viewerResponse.Body)
+		}
+		if got := request("POST", path, `{"domain":"bad domain","zone_id":"draft-zone"}`, cookie); got.Code != 400 {
+			t.Fatalf("invalid domain got %d: %s", got.Code, got.Body)
+		}
+
+		transport := http.DefaultTransport
+		t.Cleanup(func() { http.DefaultTransport = transport })
+		for _, token := range []string{"new-token", settings.CloudflareToken} {
+			var calls int
+			http.DefaultTransport = cloudflareTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.Header.Get("Authorization") != "Bearer "+token {
+					t.Error("unexpected Cloudflare credential")
+				}
+				if !strings.HasPrefix(r.URL.Path, "/client/v4/zones/draft-zone") {
+					t.Errorf("unexpected zone: %s", r.URL.Path)
+				}
+				payload := `{"success":true,"result":{"name":"example.com","id":"probe-id"}}`
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(payload))}, nil
+			})
+			testBody := body
+			if token == settings.CloudflareToken {
+				testBody = strings.Replace(body, "new-token", "", 1)
+			}
+			got := request("POST", path, testBody, cookie)
+			if got.Code != 200 || strings.TrimSpace(got.Body.String()) != `{"ok":true}` || calls != 3 {
+				t.Fatalf("Cloudflare test: %d %s (%d calls)", got.Code, got.Body, calls)
+			}
+		}
+		var saved provision.Settings
+		if err := s.GetSetting(context.Background(), "provider", &saved); err != nil || saved != settings {
+			t.Fatal("Cloudflare test changed stored settings", err)
+		}
+	})
 	t.Run("shared host creation and installation port locking", func(t *testing.T) {
 		res := request("POST", "/api/v1/nodes", `{"name":"panel node","host":"192.0.2.10","group_id":"default","shared_host":true}`, cookie)
 		if res.Code != 201 {

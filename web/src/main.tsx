@@ -1,4 +1,4 @@
-import React,{useEffect,useState,type FormEvent,type ReactNode} from 'react';
+import React,{useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {QRCodeSVG} from 'qrcode.react';
 import {Activity,ArrowUpLeft,Check,CheckCircle2,ChevronLeft,Copy,Globe2,LayoutDashboard,LogOut,Network,Plus,RefreshCw,Server,Settings as SettingsIcon,ShieldCheck,Users,X,Clock,AlertCircle} from 'lucide-react';
@@ -13,6 +13,7 @@ const menu=[['overview','نمای کلی',LayoutDashboard],['nodes','سروره�
 const fa=(n:number)=>n.toLocaleString('fa-IR');
 const initialSettings:Settings={domain:'',zone_id:'',cloudflare_token:'',email:'',agent_url:'',public_url:location.origin,reality_target:'www.microsoft.com:443',reality_sni:'www.microsoft.com',acme_url:''};
 type SettingsResponse={settings:Settings;has_token:boolean;configured:boolean};
+const cloudflareFields: ReadonlyArray<keyof Settings> = ['domain','zone_id','cloudflare_token'];
 function Field({label,children}: {label:string;children:ReactNode}){return <label className="field"><span>{label}</span>{children}</label>}
 
 function PasswordForm({username}:{username:string}){
@@ -73,7 +74,30 @@ function App(){
  const [settings,setSettings]=useState<Settings>(initialSettings),[hasToken,setHasToken]=useState(false),[configured,setConfigured]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false);
  const [modal,setModal]=useState<'user'|'node'|'group'|null>(null),[editing,setEditing]=useState<User|null>(null),[subscription,setSubscription]=useState<User|null>(null),[installing,setInstalling]=useState<VPNNode|null>(null),[search,setSearch]=useState('');
  async function load(){const [u,n,g,j]=await Promise.all([api<User[]>('/users'),api<VPNNode[]>('/nodes'),api<Group[]>('/groups'),api<Job[]>('/jobs')]);setUsers(u);setNodes(n);setGroups(g);setJobs(j);setLoaded(true)}
- async function loadSettings(){const v=await api<SettingsResponse>('/settings');setSettings({...initialSettings,...v.settings,cloudflare_token:''});setHasToken(v.has_token);setConfigured(v.configured);return v}
+ const [testingCloudflare,setTestingCloudflare]=useState(false);
+ const [cloudflareResult,setCloudflareResult]=useState<{ok:boolean;message:string}|null>(null);
+ const settingsRevision=useRef(0);
+ async function loadSettings(){const v=await api<SettingsResponse>('/settings');settingsRevision.current++;setSettings({...initialSettings,...v.settings,cloudflare_token:''});setCloudflareResult(null);setHasToken(v.has_token);setConfigured(v.configured);return v}
+ async function testCloudflare(){
+  const {domain,zone_id,cloudflare_token}=settings;
+  const revision=settingsRevision.current;
+  setCloudflareResult(null);
+  setTestingCloudflare(true);
+  try {
+   await api('/settings/cloudflare/test','POST',{domain,zone_id,cloudflare_token});
+   if(revision===settingsRevision.current){
+    setCloudflareResult({ok:true,message:'تست Cloudflare موفق بود. رکورد TXT ساخته و حذف شد.'});
+   }
+  } catch(e) {
+   if(revision===settingsRevision.current){
+    const message=e instanceof Error&&!(e instanceof TypeError||e instanceof SyntaxError)
+     ?e.message:'ارتباط با پنل برقرار نشد';
+    setCloudflareResult({ok:false,message});
+   }
+  } finally {
+   setTestingCloudflare(false);
+  }
+ }
  useEffect(()=>{api<{username:string;role:string}>('/me').then(setAccount).catch(()=>{}).finally(()=>setChecking(false))},[]);
  useEffect(()=>{if(!account)return;load().catch(e=>setError(e.message));const timer=setInterval(()=>load().catch(()=>{}),10000);return()=>clearInterval(timer)},[account]);
  useEffect(()=>{if(!account)return;loadSettings().then(v=>{if(!v.configured&&account.role==='admin'){setTab('settings');setNotice('به راه خوش آمدید؛ تنظیمات Cloudflare را وارد کنید، سپس اولین سرور را اضافه کنید.')}}).catch(e=>setError(e.message))},[account]);
@@ -92,7 +116,24 @@ function App(){
  {tab==='users'&&<section className="card"><div className="toolbar"><input aria-label="جست‌وجوی کاربران" placeholder="جست‌وجوی کاربر…" value={search} onChange={e=>setSearch(e.target.value)}/><span className="muted">{fa(users.length)} کاربر</span></div><div className="table-wrap"><table><thead><tr><th>کاربر</th><th>وضعیت</th><th>مصرف / سهمیه</th><th>انقضا</th><th>عملیات</th></tr></thead><tbody>{users.filter(u=>u.name.includes(search)).map(u=><tr key={u.id}><td><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small></td><td><span className={'badge '+(u.enabled?'good':'neutral')}>{u.enabled?'فعال':'تعلیق'}</span></td><td dir="ltr">{bytes(u.used_bytes)} / {u.quota_bytes?bytes(u.quota_bytes):'∞'}</td><td>{new Date(u.expires_at).toLocaleDateString('fa-IR')}</td><td><div className="actions"><button className="text-btn" onClick={()=>setSubscription(u)}>اشتراک</button>{canEdit&&<><button className="text-btn" onClick={()=>{setEditing(u);setModal('user')}}>ویرایش</button><button className="text-btn" onClick={()=>perform(()=>api('/users/'+u.id,'PUT',{...u,enabled:!u.enabled}), 'وضعیت کاربر تغییر کرد')}>{u.enabled?'تعلیق':'فعال‌سازی'}</button><button className="text-btn danger" onClick={()=>{if(confirm('کاربر و اعتبارنامه‌های او حذف شوند؟'))perform(()=>api('/users/'+u.id,'DELETE'),'کاربر حذف شد')}}>حذف</button></>}</div></td></tr>)}</tbody></table></div>{users.length===0&&<Empty title="هنوز کاربری ندارید" text="پس از نصب اولین سرور، یک کاربر بسازید و اشتراک او را دریافت کنید."/>}</section>}
  {tab==='jobs'&&<section className="card"><div className="section-heading"><h2>آخرین عملیات</h2><span className="muted">به‌روزرسانی هر ۱۰ ثانیه</span></div>{jobs.length===0?<Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/>:jobs.map(j=><div className="job" key={j.id}><span className={'job-icon '+(j.status==='completed'?'good':'')}><Clock size={20}/></span><div><strong>{nodes.find(n=>n.id===j.node_id)?.name||j.node_id}</strong><small><bdi>{j.step}</bdi> · {new Date(j.updated_at).toLocaleString('fa-IR')}</small>{j.error&&<p className="job-error">{j.error}</p>}</div><span className="badge neutral">{({queued:'در صف',running:'در حال اجرا',completed:'تکمیل‌شده',failed:'ناموفق',interrupted:'متوقف‌شده'} as Record<string,string>)[j.status]||j.status}</span></div>)}</section>}
  {tab==='settings'&&canEdit&&<PasswordForm username={account.username}/>}
- {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{e.preventDefault();perform(async()=>{await api('/settings','PUT',settings);await loadSettings();if(!configured)setTab('nodes')},'تنظیمات ذخیره شد؛ اکنون می‌توانید سرور اضافه کنید.')}}><h2>دامنه و اتصال Cloudflare</h2><p className="muted">{!configured?'مرحله اول راه‌اندازی: دامنه نودها و دسترسی Cloudflare را وارد کنید. ':''}توکن با دسترسی DNS Edit و Zone Read فقط برای همین Zone. توکن ذخیره‌شده دوباره نمایش داده نمی‌شود. آدرس پنل و عامل‌ها هنگام نصب تنظیم شده‌اند.</p><div className="form-grid">{([['domain','دامنه پایه','text'],['zone_id','Cloudflare Zone ID','text'],['cloudflare_token',hasToken?'توکن جدید (خالی = حفظ قبلی)':'Cloudflare API Token','password'],['email','ایمیل دریافت گواهی','email'],['public_url','آدرس HTTPS پنل','url'],['agent_url','آدرس mTLS عامل‌ها، شامل پورت','url'],['reality_target','مقصد REALITY با پورت','text'],['reality_sni','نام سرور REALITY','text'],['acme_url','ACME Directory (خالی = Let’s Encrypt)','url']] as const).map(([key,label,type])=><Field key={key} label={label}><input dir="ltr" type={type} autoComplete={type==='password'?'new-password':'off'} value={settings[key]} readOnly={key==='public_url'||key==='agent_url'} onChange={e=>setSettings({...settings,[key]:e.target.value})} required={!['cloudflare_token','acme_url'].includes(key)||key==='cloudflare_token'&&!hasToken}/></Field>)}</div><footer><button className="primary" disabled={busy||!canEdit}>{busy?'در حال ذخیره…':configured?'ذخیره تنظیمات':'ذخیره و ادامه به افزودن سرور'}</button></footer></form>}
+ {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{
+  e.preventDefault();
+  if(testingCloudflare)return;
+  perform(async()=>{
+   await api('/settings','PUT',settings);
+   await loadSettings();
+   if(!configured)setTab('nodes');
+  },'تنظیمات ذخیره شد؛ اکنون می‌توانید سرور اضافه کنید.');
+ }}>
+  <h2>دامنه و اتصال Cloudflare</h2>
+  <p className="muted">{!configured?'مرحله اول راه‌اندازی: دامنه نودها و دسترسی Cloudflare را وارد کنید. ':''}توکن با دسترسی DNS Edit و Zone Read فقط برای همین Zone. توکن ذخیره‌شده دوباره نمایش داده نمی‌شود. آدرس پنل و عامل‌ها هنگام نصب تنظیم شده‌اند.</p>
+  <div className="form-grid">{([['domain','دامنه پایه','text'],['zone_id','Cloudflare Zone ID','text'],['cloudflare_token',hasToken?'توکن جدید (خالی = حفظ قبلی)':'Cloudflare API Token','password'],['email','ایمیل دریافت گواهی','email'],['public_url','آدرس HTTPS پنل','url'],['agent_url','آدرس mTLS عامل‌ها، شامل پورت','url'],['reality_target','مقصد REALITY با پورت','text'],['reality_sni','نام سرور REALITY','text'],['acme_url','ACME Directory (خالی = Let’s Encrypt)','url']] as const).map(([key,label,type])=><Field key={key} label={label}><input dir="ltr" type={type} autoComplete={type==='password'?'new-password':'off'} value={settings[key]} readOnly={key==='public_url'||key==='agent_url'} disabled={testingCloudflare&&cloudflareFields.includes(key)} onChange={e=>{
+   if(cloudflareFields.includes(key))setCloudflareResult(null);
+   setSettings({...settings,[key]:e.target.value});
+  }} required={!['cloudflare_token','acme_url'].includes(key)||key==='cloudflare_token'&&!hasToken}/></Field>)}</div>
+  {cloudflareResult&&<p role={cloudflareResult.ok?'status':'alert'} className={cloudflareResult.ok?'banner success':'form-error'}>{cloudflareResult.message}</p>}
+  <footer className="actions">{canEdit&&<button type="button" className="secondary" disabled={busy||testingCloudflare} onClick={testCloudflare}>{testingCloudflare?'در حال تست…':'تست Cloudflare'}</button>}
+  <button className="primary" disabled={busy||testingCloudflare||!canEdit}>{busy?'در حال ذخیره…':configured?'ذخیره تنظیمات':'ذخیره و ادامه به افزودن سرور'}</button></footer></form>}
  {tab==='audit'&&<section className="card table-wrap"><table><thead><tr><th>رویداد</th><th>شناسه هدف</th><th>زمان</th></tr></thead><tbody>{audit.map((a,i)=><tr key={i}><td className="mono">{a.action}</td><td className="mono">{a.target}</td><td>{new Date(a.created_at).toLocaleString('fa-IR')}</td></tr>)}</tbody></table>{audit.length===0&&<Empty title="رویدادی وجود ندارد" text="تغییرات مدیریتی در این بخش ثبت می‌شوند."/>}</section>}
  <footer className="page-footer"><span>راه · مدیریت زیرساخت اتصال</span><span>آمار مصرف با تأخیر همگام‌سازی نمایش داده می‌شود.</span></footer></main></div>
  {modal==='user'&&<UserForm user={editing} groups={groups} close={()=>setModal(null)} save={async value=>{await api('/users'+(editing?'/'+editing.id:''),editing?'PUT':'POST',value);await load();setModal(null);setNotice('کاربر ذخیره شد')}}/>}

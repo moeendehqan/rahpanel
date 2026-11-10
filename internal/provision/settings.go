@@ -20,8 +20,12 @@ type Settings struct {
 
 var domainRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
 
+func ValidDomain(domain string) bool {
+	return domainRE.MatchString(domain)
+}
+
 func (s Settings) Validate() error {
-	if !domainRE.MatchString(s.Domain) || s.ZoneID == "" || s.CloudflareToken == "" || s.Email == "" {
+	if !ValidDomain(s.Domain) || s.ZoneID == "" || s.CloudflareToken == "" || s.Email == "" {
 		return fmt.Errorf("domain, zone ID, Cloudflare token and ACME email are required")
 	}
 	for _, v := range []string{s.AgentURL, s.PublicURL} {

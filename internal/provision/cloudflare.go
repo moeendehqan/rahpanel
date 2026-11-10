@@ -3,6 +3,7 @@ package provision
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +27,12 @@ type record struct {
 	Comment string `json:"comment,omitempty"`
 	TTL     int    `json:"ttl"`
 	Proxied bool   `json:"proxied"`
+}
+
+type cloudflareRejection int
+
+func (e cloudflareRejection) Error() string {
+	return fmt.Sprintf("Cloudflare rejected request (HTTP %d); verify token permissions and zone", e)
 }
 
 func (d DNS) call(ctx context.Context, method, path string, body any, out any) error {
@@ -64,13 +71,55 @@ func (d DNS) call(ctx context.Context, method, path string, body any, out any) e
 		return fmt.Errorf("invalid Cloudflare response")
 	}
 	if res.StatusCode/100 != 2 || !response.Success {
-		return fmt.Errorf("Cloudflare rejected request (HTTP %d); verify token permissions and zone", res.StatusCode)
+		return cloudflareRejection(res.StatusCode)
 	}
 	if out != nil {
 		return json.Unmarshal(response.Result, out)
 	}
 	return nil
 }
+
+// TestWrite verifies access to the zone and creates and removes one probe record.
+func (d DNS) TestWrite(ctx context.Context, domain string) error {
+	var zone struct {
+		Name string `json:"name"`
+	}
+	readCtx, cancelRead := context.WithTimeout(ctx, 5*time.Second)
+	err := d.call(readCtx, "GET", "", nil, &zone)
+	cancelRead()
+	if err != nil || zone.Name == "" {
+		return fmt.Errorf("خواندن Zone در Cloudflare ناموفق بود. شناسهٔ Zone، دسترسی توکن و اتصال سرور را بررسی کنید")
+	}
+	if domain != zone.Name && !strings.HasSuffix(domain, "."+zone.Name) {
+		return fmt.Errorf("دامنهٔ پایه در Zone انتخاب‌شده قرار ندارد")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("تست Cloudflare لغو شد")
+	}
+
+	name := "_rahpanel-test-" + strings.ToLower(rand.Text()) + "." + domain
+	probe := record{Type: "TXT", Name: name, Content: "rahpanel-test", Comment: "rahpanel:cloudflare-test", TTL: 60}
+	var created record
+	// Once the write starts, allow it and its cleanup to finish after a disconnect.
+	detached := context.WithoutCancel(ctx)
+	createCtx, cancelCreate := context.WithTimeout(detached, 5*time.Second)
+	err = d.call(createCtx, "POST", "/dns_records", probe, &created)
+	cancelCreate()
+	if rejection, ok := err.(cloudflareRejection); ok && rejection >= 400 && rejection < 500 && rejection != http.StatusRequestTimeout {
+		return fmt.Errorf("Cloudflare ساخت رکورد TXT را رد کرد. مجوز DNS Edit را بررسی کنید")
+	}
+	if err != nil || created.ID == "" {
+		return fmt.Errorf("ساخت رکورد TXT تأیید نشد. وجود رکورد %s را در Cloudflare بررسی کنید", name)
+	}
+
+	deleteCtx, cancelDelete := context.WithTimeout(detached, 5*time.Second)
+	defer cancelDelete()
+	if err := d.Delete(deleteCtx, created.ID); err != nil {
+		return fmt.Errorf("حذف رکورد TXT تأیید نشد. رکورد %s را در Cloudflare بررسی کنید", name)
+	}
+	return nil
+}
+
 func (d DNS) EnsureAddress(ctx context.Context, domain, ip, nodeID string) error {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {

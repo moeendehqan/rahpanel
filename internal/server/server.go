@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/jobs", s.authorize(s.jobs))
 	m.HandleFunc("GET /api/v1/settings", s.authorize(s.settings))
 	m.HandleFunc("PUT /api/v1/settings", s.authorize(s.saveSettings))
+	m.HandleFunc("POST /api/v1/settings/cloudflare/test", s.authorize(s.testCloudflare))
 	m.HandleFunc("GET /api/v1/audit", s.authorize(s.audit))
 	m.HandleFunc("GET /sub/{token}", s.subscription)
 	m.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -399,6 +400,44 @@ func (s *Server) agentEndpoint() string {
 	}
 	return "https://" + net.JoinHostPort(u.Hostname(), "9443")
 }
+
+func (s *Server) testCloudflare(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Domain string `json:"domain"`
+		ZoneID string `json:"zone_id"`
+		Token  string `json:"cloudflare_token"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	if !provision.ValidDomain(input.Domain) || strings.TrimSpace(input.ZoneID) == "" {
+		problem(w, http.StatusBadRequest, "دامنهٔ پایهٔ معتبر و شناسهٔ Zone را وارد کنید")
+		return
+	}
+	if input.Token == "" {
+		var saved provision.Settings
+		err := s.Store.GetSetting(r.Context(), "provider", &saved)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			problem(w, http.StatusInternalServerError, "خواندن تنظیمات ذخیره‌شده ناموفق بود")
+			return
+		}
+		input.Token = saved.CloudflareToken
+	}
+	if strings.TrimSpace(input.Token) == "" {
+		problem(w, http.StatusBadRequest, "توکن Cloudflare را وارد کنید")
+		return
+	}
+
+	dns := provision.DNS{Zone: input.ZoneID, Token: input.Token, Client: &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
+	if err := dns.TestWrite(r.Context(), input.Domain); err != nil {
+		problem(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	write(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	var v provision.Settings
 	if !decode(w, r, &v) {
