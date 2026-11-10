@@ -101,9 +101,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	token := core.RandomToken()
 	expires := time.Now().Add(8 * time.Hour)
-	_, e = tx.ExecContext(r.Context(), "INSERT INTO sessions(hash,admin_id,expires_at) VALUES($1,$2,$3)", store.Hash(token), id, expires)
+	// Lock the credential row so a concurrent password change can revoke this session.
+	result, e := tx.ExecContext(r.Context(), `INSERT INTO sessions(hash,admin_id,expires_at)
+		SELECT $1,id,$2 FROM admins WHERE id=$3 AND password=$4 FOR UPDATE`, store.Hash(token), expires, id, hash)
 	if e != nil {
 		problem(w, 503, "Login unavailable")
+		return
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		problem(w, 401, "Invalid credentials")
 		return
 	}
 	if e = tx.Commit(); e != nil {
@@ -146,6 +152,69 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, 200, map[string]string{"username": name, "role": role})
+}
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Current string `json:"current_password"`
+		New     string `json:"new_password"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if len(body.New) < 14 || len(body.New) > 72 || body.New == body.Current {
+		problem(w, 400, "Choose a different password between 14 and 72 bytes")
+		return
+	}
+
+	ctx := r.Context()
+	id := ctx.Value(adminKey{}).(string)
+	if !s.limiter.allow("password:" + id) {
+		problem(w, 429, "Too many password change attempts; retry in one minute")
+		return
+	}
+	var oldHash []byte
+	if err := s.Store.DB.QueryRowContext(ctx, "SELECT password FROM admins WHERE id=$1", id).Scan(&oldHash); err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+	if len(body.Current) > 72 || bcrypt.CompareHashAndPassword(oldHash, []byte(body.Current)) != nil {
+		problem(w, 400, "Current password is incorrect")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(body.New), 12)
+	if err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+
+	tx, err := s.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+	defer tx.Rollback()
+	cookie, _ := r.Cookie("rah_session")
+	sessionHash := store.Hash(cookie.Value)
+	result, err := tx.ExecContext(ctx, `UPDATE admins SET password=$1 WHERE id=$2 AND password=$3
+		AND EXISTS (SELECT 1 FROM sessions WHERE hash=$4 AND admin_id=$2 AND expires_at>now())`, newHash, id, oldHash, sessionHash)
+	if err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		problem(w, 409, "Password or session changed; sign in again and retry")
+		return
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE admin_id=$1 AND hash<>$2", id, sessionHash); err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		problem(w, 503, "Password change unavailable")
+		return
+	}
+	s.auditAction(r, "admin.password_change", id)
+	write(w, 200, map[string]bool{"ok": true})
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	cookie, _ := r.Cookie("rah_session")

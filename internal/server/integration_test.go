@@ -144,7 +144,8 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("session cookie lacks protections")
 	}
-	if again := request("POST", "/api/v1/login", login, nil); again.Code != 200 {
+	again := request("POST", "/api/v1/login", login, nil)
+	if again.Code != 200 {
 		t.Fatal("password login unexpectedly requires a second factor")
 	}
 	user := core.User{Name: "alice", Enabled: true, ExpiresAt: time.Now().Add(time.Hour), QuotaBytes: 10000, GroupID: "default"}
@@ -226,6 +227,34 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 		}
 		if err = s.QueueInstall(context.Background(), core.Job{ID: core.ID(), NodeID: n.ID, Status: "queued", Step: "queued"}, &other); err != store.ErrNodePortsLocked {
 			t.Fatal("ready node ports changed", err)
+		}
+	})
+	t.Run("change admin password", func(t *testing.T) {
+		const path = "/api/v1/me/password"
+		const change = `{"current_password":"a-long-test-password","new_password":"a-new-test-password"}`
+		if w := request("PUT", path, change, nil); w.Code != 401 {
+			t.Fatalf("unauthenticated password change: %d", w.Code)
+		}
+		wrong := strings.Replace(change, "a-long-test-password", "incorrect", 1)
+		if w := request("PUT", path, wrong, cookie); w.Code != 400 {
+			t.Fatalf("wrong current password: %d", w.Code)
+		}
+		if w := request("PUT", path, change, cookie); w.Code != 200 {
+			t.Fatalf("password change: %d %s", w.Code, w.Body)
+		}
+		if w := request("GET", "/api/v1/me", "", again.Result().Cookies()[0]); w.Code != 401 {
+			t.Fatalf("previous session still valid: %d", w.Code)
+		}
+		if w := request("GET", "/api/v1/me", "", cookie); w.Code != 200 {
+			t.Fatalf("current session lost: %d", w.Code)
+		}
+		srv.limiter = newLoginLimiter()
+		if w := request("POST", "/api/v1/login", login, nil); w.Code != 401 {
+			t.Fatalf("old password login: %d", w.Code)
+		}
+		newLogin := strings.Replace(login, "a-long-test-password", "a-new-test-password", 1)
+		if w := request("POST", "/api/v1/login", newLogin, nil); w.Code != 200 {
+			t.Fatalf("new password login: %d %s", w.Code, w.Body)
 		}
 	})
 	response = request("POST", "/api/v1/logout", "", cookie)

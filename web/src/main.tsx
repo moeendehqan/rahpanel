@@ -14,6 +14,58 @@ const fa=(n:number)=>n.toLocaleString('fa-IR');
 const initialSettings:Settings={domain:'',zone_id:'',cloudflare_token:'',email:'',agent_url:'',public_url:location.origin,reality_target:'www.microsoft.com:443',reality_sni:'www.microsoft.com',acme_url:''};
 type SettingsResponse={settings:Settings;has_token:boolean;configured:boolean};
 function Field({label,children}: {label:string;children:ReactNode}){return <label className="field"><span>{label}</span>{children}</label>}
+
+function PasswordForm({username}:{username:string}){
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+ async function submit(e:FormEvent<HTMLFormElement>){
+  e.preventDefault();
+  const form=e.currentTarget;
+  const data=new FormData(form);
+  const current=String(data.get('current_password'));
+  const password=String(data.get('new_password'));
+  setError('');
+  setSaved(false);
+  if(password!==data.get('confirm_password')){
+   setError('رمز جدید و تکرار آن یکسان نیستند.');
+   return;
+  }
+  const length=new TextEncoder().encode(password).length;
+  if(length<14||length>72||current===password){
+   setError('رمزی متفاوت از رمز فعلی و با طول ۱۴ تا ۷۲ بایت انتخاب کنید.');
+   return;
+  }
+  setBusy(true);
+  try{
+   await api('/me/password','PUT',{current_password:current,new_password:password});
+   form.reset();
+   setSaved(true);
+  }catch(e){
+   const message=(e as Error).message;
+   const translations:Record<string,string>={
+    'Current password is incorrect':'رمز فعلی درست نیست.',
+    'Too many password change attempts; retry in one minute':'تعداد تلاش‌ها زیاد است. یک دقیقه دیگر دوباره تلاش کنید.',
+    'Password or session changed; sign in again and retry':'رمز یا نشست تغییر کرده است. دوباره وارد شوید و تلاش کنید.',
+    'Session expired':'نشست منقضی شده است. دوباره وارد شوید.',
+   };
+   setError(translations[message]||'تغییر رمز انجام نشد. دوباره تلاش کنید.');
+  }finally{
+   setBusy(false);
+  }
+ }
+ return <form className="card settings-form" onSubmit={submit}>
+  <h2>تغییر رمز ورود ادمین</h2>
+  <p className="muted" id="password-hint">رمز جدید باید ۱۴ تا ۷۲ بایت باشد. پس از تغییر رمز، نشست‌های دیگر این حساب بسته می‌شوند.</p>
+  <input hidden name="username" autoComplete="username" value={username} readOnly/>
+  <div className="form-grid">
+   <Field label="رمز فعلی"><input name="current_password" dir="ltr" type="password" autoComplete="current-password" disabled={busy} required/></Field>
+   <Field label="رمز جدید"><input name="new_password" dir="ltr" type="password" autoComplete="new-password" aria-describedby="password-hint" disabled={busy} required/></Field>
+   <Field label="تکرار رمز جدید"><input name="confirm_password" dir="ltr" type="password" autoComplete="new-password" disabled={busy} required/></Field>
+  </div>
+  {error&&<p role="alert" className="form-error">{error}</p>}
+  {saved&&<p role="status" className="banner success">رمز ورود تغییر کرد.</p>}
+  <footer><button className="primary" disabled={busy}>{busy?'در حال تغییر…':'ذخیره رمز جدید'}</button></footer>
+ </form>;
+}
 function Modal({title,close,children}:{title:string;close:()=>void;children:ReactNode}){useEffect(()=>{const fn=(e:KeyboardEvent)=>{if(e.key==='Escape')close()};document.addEventListener('keydown',fn);const previous=document.activeElement as HTMLElement|null;const first=document.querySelector<HTMLElement>('[role="dialog"] input,[role="dialog"] button');first?.focus();return()=>{document.removeEventListener('keydown',fn);previous?.focus()}},[close]);return <div className="overlay" onClick={e=>{if(e.target===e.currentTarget)close()}}><section role="dialog" aria-modal="true" aria-label={title} className="modal" onKeyDown={e=>{if(e.key!=='Tab')return;const els=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input,select,textarea,a[href]'));const first=els[0],last=els[els.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}}><header><h2>{title}</h2><button className="icon" aria-label="بستن" onClick={close}><X size={20}/></button></header>{children}</section></div>}
 function App(){
  const [account,setAccount]=useState<{username:string;role:string}|null>(null),[checking,setChecking]=useState(true),[tab,setTab]=useState<Tab>('overview');
@@ -39,6 +91,7 @@ function App(){
  {tab==='nodes'&&<><div className="toolbar"><input aria-label="جست‌وجوی سرورها" placeholder="جست‌وجوی نام یا IP سرور…" value={search} onChange={e=>setSearch(e.target.value)}/>{canEdit&&<button className="secondary" onClick={()=>setModal('group')}>گروه جدید</button>}</div><NodeList nodes={nodes.filter(n=>(n.name+n.host).includes(search))} groups={groups} onInstall={canEdit?setInstalling:undefined} onToggle={canEdit?n=>perform(()=>api('/nodes/'+n.id,'PUT',{enabled:!n.enabled}),'وضعیت سرور تغییر کرد'):undefined}/></>}
  {tab==='users'&&<section className="card"><div className="toolbar"><input aria-label="جست‌وجوی کاربران" placeholder="جست‌وجوی کاربر…" value={search} onChange={e=>setSearch(e.target.value)}/><span className="muted">{fa(users.length)} کاربر</span></div><div className="table-wrap"><table><thead><tr><th>کاربر</th><th>وضعیت</th><th>مصرف / سهمیه</th><th>انقضا</th><th>عملیات</th></tr></thead><tbody>{users.filter(u=>u.name.includes(search)).map(u=><tr key={u.id}><td><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small></td><td><span className={'badge '+(u.enabled?'good':'neutral')}>{u.enabled?'فعال':'تعلیق'}</span></td><td dir="ltr">{bytes(u.used_bytes)} / {u.quota_bytes?bytes(u.quota_bytes):'∞'}</td><td>{new Date(u.expires_at).toLocaleDateString('fa-IR')}</td><td><div className="actions"><button className="text-btn" onClick={()=>setSubscription(u)}>اشتراک</button>{canEdit&&<><button className="text-btn" onClick={()=>{setEditing(u);setModal('user')}}>ویرایش</button><button className="text-btn" onClick={()=>perform(()=>api('/users/'+u.id,'PUT',{...u,enabled:!u.enabled}), 'وضعیت کاربر تغییر کرد')}>{u.enabled?'تعلیق':'فعال‌سازی'}</button><button className="text-btn danger" onClick={()=>{if(confirm('کاربر و اعتبارنامه‌های او حذف شوند؟'))perform(()=>api('/users/'+u.id,'DELETE'),'کاربر حذف شد')}}>حذف</button></>}</div></td></tr>)}</tbody></table></div>{users.length===0&&<Empty title="هنوز کاربری ندارید" text="پس از نصب اولین سرور، یک کاربر بسازید و اشتراک او را دریافت کنید."/>}</section>}
  {tab==='jobs'&&<section className="card"><div className="section-heading"><h2>آخرین عملیات</h2><span className="muted">به‌روزرسانی هر ۱۰ ثانیه</span></div>{jobs.length===0?<Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/>:jobs.map(j=><div className="job" key={j.id}><span className={'job-icon '+(j.status==='completed'?'good':'')}><Clock size={20}/></span><div><strong>{nodes.find(n=>n.id===j.node_id)?.name||j.node_id}</strong><small><bdi>{j.step}</bdi> · {new Date(j.updated_at).toLocaleString('fa-IR')}</small>{j.error&&<p className="job-error">{j.error}</p>}</div><span className="badge neutral">{({queued:'در صف',running:'در حال اجرا',completed:'تکمیل‌شده',failed:'ناموفق',interrupted:'متوقف‌شده'} as Record<string,string>)[j.status]||j.status}</span></div>)}</section>}
+ {tab==='settings'&&canEdit&&<PasswordForm username={account.username}/>}
  {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{e.preventDefault();perform(async()=>{await api('/settings','PUT',settings);await loadSettings();if(!configured)setTab('nodes')},'تنظیمات ذخیره شد؛ اکنون می‌توانید سرور اضافه کنید.')}}><h2>دامنه و اتصال Cloudflare</h2><p className="muted">{!configured?'مرحله اول راه‌اندازی: دامنه نودها و دسترسی Cloudflare را وارد کنید. ':''}توکن با دسترسی DNS Edit و Zone Read فقط برای همین Zone. توکن ذخیره‌شده دوباره نمایش داده نمی‌شود. آدرس پنل و عامل‌ها هنگام نصب تنظیم شده‌اند.</p><div className="form-grid">{([['domain','دامنه پایه','text'],['zone_id','Cloudflare Zone ID','text'],['cloudflare_token',hasToken?'توکن جدید (خالی = حفظ قبلی)':'Cloudflare API Token','password'],['email','ایمیل دریافت گواهی','email'],['public_url','آدرس HTTPS پنل','url'],['agent_url','آدرس mTLS عامل‌ها، شامل پورت','url'],['reality_target','مقصد REALITY با پورت','text'],['reality_sni','نام سرور REALITY','text'],['acme_url','ACME Directory (خالی = Let’s Encrypt)','url']] as const).map(([key,label,type])=><Field key={key} label={label}><input dir="ltr" type={type} autoComplete={type==='password'?'new-password':'off'} value={settings[key]} readOnly={key==='public_url'||key==='agent_url'} onChange={e=>setSettings({...settings,[key]:e.target.value})} required={!['cloudflare_token','acme_url'].includes(key)||key==='cloudflare_token'&&!hasToken}/></Field>)}</div><footer><button className="primary" disabled={busy||!canEdit}>{busy?'در حال ذخیره…':configured?'ذخیره تنظیمات':'ذخیره و ادامه به افزودن سرور'}</button></footer></form>}
  {tab==='audit'&&<section className="card table-wrap"><table><thead><tr><th>رویداد</th><th>شناسه هدف</th><th>زمان</th></tr></thead><tbody>{audit.map((a,i)=><tr key={i}><td className="mono">{a.action}</td><td className="mono">{a.target}</td><td>{new Date(a.created_at).toLocaleString('fa-IR')}</td></tr>)}</tbody></table>{audit.length===0&&<Empty title="رویدادی وجود ندارد" text="تغییرات مدیریتی در این بخش ثبت می‌شوند."/>}</section>}
  <footer className="page-footer"><span>راه · مدیریت زیرساخت اتصال</span><span>آمار مصرف با تأخیر همگام‌سازی نمایش داده می‌شود.</span></footer></main></div>

@@ -68,6 +68,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/login", s.login)
 	m.HandleFunc("POST /api/v1/logout", s.authorize(s.logout))
 	m.HandleFunc("GET /api/v1/me", s.authorize(s.me))
+	m.HandleFunc("PUT /api/v1/me/password", s.authorize(s.changePassword))
 	m.HandleFunc("GET /api/v1/users", s.authorize(s.users))
 	m.HandleFunc("POST /api/v1/users", s.authorize(s.createUser))
 	m.HandleFunc("PUT /api/v1/users/{id}", s.authorize(s.updateUser))
