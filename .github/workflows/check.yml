@@ -53,3 +53,44 @@ jobs:
       - name: Clean up
         if: always()
         run: docker compose down --volumes
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, docker-smoke]
+    runs-on: ubuntu-latest
+    permissions: {}
+    concurrency:
+      group: rahpanel-production
+      cancel-in-progress: false
+    steps:
+      - name: Update the production panel
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set DEPLOY_HOST}" "${DEPLOY_USER:?Set DEPLOY_USER}"
+          : "${DEPLOY_SSH_KEY:?Set DEPLOY_SSH_KEY}" "${DEPLOY_KNOWN_HOSTS:?Set DEPLOY_KNOWN_HOSTS}"
+          umask 077
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -f -- "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir -- "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -i "$ssh_dir/key" -l "$DEPLOY_USER" -- "$DEPLOY_HOST" "bash -se -- $GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/rahpanel
+          git fetch origin refs/heads/main
+          if [[ "$(git rev-parse FETCH_HEAD)" != "$1" ]]; then
+            echo 'main has advanced since this run. Skipping deployment.'
+            exit 0
+          fi
+          test "$(git branch --show-current)" = main
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git merge --ff-only "$1"
+          test "$(git rev-parse HEAD)" = "$1"
+          bash rah.sh update
+          docker compose exec -T panel /app/rahctl healthcheck
+          REMOTE
