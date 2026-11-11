@@ -249,6 +249,7 @@ func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
 	}
 	n.ID = core.ID()
 	n.Domain = "n-" + strings.ReplaceAll(n.ID, "-", "")[:12] + "." + cfg.Domain
+	cfg.UseRealityDefaults()
 	n.RealityTarget = cfg.RealityTarget
 	n.RealitySNI = cfg.RealitySNI
 	n.Enabled = true
@@ -446,12 +447,7 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 	// Endpoints come from the installed listeners, not manual provider configuration.
 	v.PublicURL = s.PublicURL
 	v.AgentURL = s.agentEndpoint()
-	if v.RealityTarget == "" {
-		v.RealityTarget = "www.microsoft.com:443"
-	}
-	if v.RealitySNI == "" {
-		v.RealitySNI = "www.microsoft.com"
-	}
+	v.UseRealityDefaults()
 	configured := v.Validate() == nil
 	v.CloudflareToken = ""
 	write(w, 200, map[string]any{"settings": v, "has_token": has, "configured": configured})
@@ -517,6 +513,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 			v.CloudflareToken = old.CloudflareToken
 		}
 	}
+	v.UseRealityDefaults()
 	if e := v.Validate(); e != nil {
 		problem(w, 400, e.Error())
 		return
@@ -591,6 +588,8 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 				creds = append(creds, c)
 			}
 		}
+		// Rank subscriptions using the live monitor samples.
+		n.RouteQuality = nil
 		s.Worker.ApplyRouteQuality(&n)
 		allowed = append(allowed, n)
 	}

@@ -39,3 +39,13 @@ func (s Settings) Validate() error {
 	}
 	return nil
 }
+
+func (s *Settings) UseRealityDefaults() {
+	const legacyHost = "www.microsoft.com"
+	const defaultHost = "www.cloudflare.com"
+	if (s.RealitySNI == "" || s.RealitySNI == legacyHost) &&
+		(s.RealityTarget == "" || s.RealityTarget == legacyHost+":443") {
+		s.RealitySNI = defaultHost
+		s.RealityTarget = defaultHost + ":443"
+	}
+}

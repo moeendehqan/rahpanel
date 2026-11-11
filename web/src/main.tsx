@@ -21,7 +21,7 @@ const expiryChartDays=30;
 type Tab='overview'|'nodes'|'users'|'jobs'|'settings'|'audit';
 const menu=[['overview','نمای کلی',LayoutDashboard],['nodes','سرورها',Server],['users','کاربران',Users],['jobs','عملیات نصب',Activity],['settings','تنظیمات',SettingsIcon],['audit','رویدادها',ShieldCheck]] as const;
 const fa=(n:number)=>n.toLocaleString('fa-IR');
-const initialSettings:Settings={domain:'',zone_id:'',cloudflare_token:'',email:'',agent_url:'',public_url:location.origin,reality_target:'www.microsoft.com:443',reality_sni:'www.microsoft.com',acme_url:''};
+const initialSettings:Settings={domain:'',zone_id:'',cloudflare_token:'',email:'',agent_url:'',public_url:location.origin,reality_target:'www.cloudflare.com:443',reality_sni:'www.cloudflare.com',acme_url:''};
 type SettingsResponse={settings:Settings;has_token:boolean;configured:boolean};
 const cloudflareFields: ReadonlyArray<keyof Settings> = ['domain','zone_id','cloudflare_token'];
 function Field({label,children}: {label:string;children:ReactNode}){return <label className="field"><span>{label}</span>{children}</label>}
