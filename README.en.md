@@ -72,6 +72,8 @@ For automatic deployment from `main`, configure these GitHub Actions secrets und
 
 GitHub Actions must be able to reach the server, and the SSH user needs access to Git and Docker in the existing installation. After the tests and Docker checks pass, the workflow backs up the database, builds the release, and checks panel health.
 
+If the deployment or its health checks fail, the workflow attempts to restore the previous checkout and panel image using the existing database. See the [release recovery drill](docs/recovery-drill.md) for verification and manual recovery.
+
 The image build fetches a pinned Xray version from its official release and verifies its checksum. The templates were tested with `v25.3.6`. Changing versions requires compatibility testing and a new release. Nodes keep their pinned version until updated.
 
 ## Adding a node

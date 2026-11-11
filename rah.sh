@@ -13,7 +13,12 @@ case "$command" in
  backup) bash scripts/backup.sh "$@" ;;
  restore) bash scripts/restore.sh "$@" ;;
  update)
-  bash scripts/backup.sh
+  if [[ ${1:-} == --existing-backup ]]; then
+   [[ ${2:-} == backups/rah-*.dump && -s ${2:-} ]] || { echo 'A deployment backup is required.' >&2; exit 1; }
+   shift 2
+  else
+   bash scripts/backup.sh
+  fi
   bash install.sh --no-install-docker "$@"
   ;;
  help|-h|--help)
