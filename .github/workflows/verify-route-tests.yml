@@ -1,0 +1,25 @@
+name: Verify route regression tests
+on:
+  push:
+    branches: [codex/verify-route-tests-e31b]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.2'
+      - run: gofmt -w internal/provision/routes_test.go
+      - name: Save formatted file to branch
+        run: |
+          if ! git diff --quiet -- internal/provision/routes_test.go; then
+            git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -m "Format route tests" -- internal/provision/routes_test.go
+            git push origin HEAD:"$GITHUB_REF"
+          fi
+      - run: go test ./internal/provision -count=1
+        if: always()
+      - run: go test ./...
+        if: always()
