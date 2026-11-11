@@ -21,6 +21,7 @@ and write against the upgraded staging database.
    the backup and saved image. On staging, after checking the checkout SHA,
    retag the saved image as `rahpanel:local` and run
    `docker compose up -d --no-build --pull never --no-deps --force-recreate --wait --wait-timeout 180 panel edge`.
+   Omit  dge if it is absent from the Compose service list.
    Verify the running image and HTTPS health. Remove both injections from the
    staging branch.
 4. Using the backup reported by the drill, start a timer and run
