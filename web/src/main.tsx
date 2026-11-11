@@ -1,7 +1,8 @@
+import {InstallJobs} from './install-jobs';
 import React,{useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {QRCodeSVG} from 'qrcode.react';
-import {Activity,ArrowUpLeft,Check,CheckCircle2,ChevronLeft,Copy,Globe2,LayoutDashboard,LogOut,Network,Plus,RefreshCw,Server,Settings as SettingsIcon,ShieldCheck,Users,X,Clock,AlertCircle} from 'lucide-react';
+import {Activity,ArrowUpLeft,Check,CheckCircle2,ChevronLeft,Copy,Globe2,LayoutDashboard,LogOut,Network,Plus,RefreshCw,Server,Settings as SettingsIcon,ShieldCheck,Users,X,AlertCircle} from 'lucide-react';
 import {api} from './api';
 import {bytes,online,userPayload,persianDate,expiryFromPersianDate,expiryFromDays,expiryTimeZone} from './helpers';
 import {checkedPorts,defaultPorts,PortFields} from './node-ports';
@@ -231,7 +232,7 @@ function App(){
      ?<Empty title="هنوز کاربری ندارید" text="پس از نصب اولین سرور، یک کاربر بسازید و اشتراک او را دریافت کنید."/>
      :<Empty title="کاربری پیدا نشد" text="فیلتر یا عبارت جست‌وجو را تغییر دهید."/>)}
  </section>}
- {tab==='jobs'&&<section className="card"><div className="section-heading"><h2>آخرین عملیات</h2><span className="muted">به‌روزرسانی هر ۱۰ ثانیه</span></div>{jobs.length===0?<Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/>:jobs.map(j=><div className="job" key={j.id}><span className={'job-icon '+(j.status==='completed'?'good':'')}><Clock size={20}/></span><div><strong>{nodes.find(n=>n.id===j.node_id)?.name||j.node_id}</strong><small><bdi>{j.step}</bdi> · {new Date(j.updated_at).toLocaleString('fa-IR')}</small>{j.error&&<p className="job-error">{j.error}</p>}</div><span className="badge neutral">{({queued:'در صف',running:'در حال اجرا',completed:'تکمیل‌شده',failed:'ناموفق',interrupted:'متوقف‌شده'} as Record<string,string>)[j.status]||j.status}</span></div>)}</section>}
+ {tab==='jobs'&&(jobs.length ? <InstallJobs jobs={jobs} nodes={nodes}/> : <section className="card"><h2>آخرین عملیات</h2><Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/></section>)}
  {tab==='settings'&&canEdit&&<PasswordForm username={account.username}/>}
  {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{
   e.preventDefault();

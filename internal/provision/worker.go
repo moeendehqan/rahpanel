@@ -70,6 +70,7 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Configure domain, Cloudflare and panel URLs first")
 		return
 	}
+	update("ssh")
 	client, e := connect(ctx, r.SSH)
 	r.SSH.Password = ""
 	r.SSH.PrivateKey = ""
@@ -78,6 +79,7 @@ func (w *Worker) run(parent context.Context, r Request) {
 		return
 	}
 	defer client.Close()
+	update("preflight")
 	script, e := preflightScript(n)
 	if e != nil {
 		fail(e.Error())

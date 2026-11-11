@@ -53,3 +53,17 @@ th small { display: block; margin-top: 3px; }
 .route-check summary:focus-visible { outline: 2px solid #247966; outline-offset: 2px; }
 .route-check dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 5px 0 8px; white-space: normal; }
 .route-check dd { margin: 0; }
+
+.install-job-toggle{width:100%;justify-content:flex-start;text-align:start;background:transparent;color:inherit}
+.install-job-toggle:hover{background:#f8faf7}
+.install-job-toggle[aria-expanded="true"]>svg{transform:rotate(-90deg)}
+.install-job-toggle>svg,.install-job-toggle>.job-icon{flex:none}
+.install-job-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.install-job-details{padding:0 0 16px;overflow-wrap:anywhere}
+.install-job-stages{margin:0;padding-inline-start:24px}
+.install-job-stages>li{padding:7px 0;border-top:1px solid #edf1e9}
+.install-job-stage{display:flex;flex-wrap:wrap;justify-content:space-between;gap:0 12px}
+.install-job-stage>span{font-size:12px;color:#496457}
+.install-job-stages>[aria-current="step"]{color:#246957}
+.install-job-message{background:#fff4ee;color:#784532;border-radius:7px;padding:8px 12px;margin-block-start:6px}
+.install-job-message p{margin:0}
