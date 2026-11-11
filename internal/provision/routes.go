@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"runtime"
@@ -27,9 +28,9 @@ type routeSample struct {
 	passes, failures int
 }
 
-func (q *routeSample) record(ok bool, elapsed time.Duration) {
+func (q *routeSample) record(err error, elapsed time.Duration) {
 	q.CheckedAt = time.Now()
-	if ok {
+	if err == nil {
 		q.failures = 0
 		q.passes++
 		if q.passes >= 2 {
@@ -42,11 +43,29 @@ func (q *routeSample) record(ok bool, elapsed time.Duration) {
 			q.LatencyMS = (3*q.LatencyMS + ms) / 4
 		}
 	} else {
+		checkedAt := q.CheckedAt
+		q.LastErrorAt = &checkedAt
+		q.LastError = routeErrorReason(err)
 		q.passes = 0
 		q.failures++
 		if q.failures >= 3 {
 			q.Weak = true
 		}
+	}
+}
+
+func routeErrorReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, errProbeStartup):
+		return "client_startup"
+	case errors.Is(err, errProbeConnection):
+		return "connection"
+	case errors.Is(err, errProbeResponse):
+		return "invalid_response"
+	default:
+		return "probe_error"
 	}
 }
 
@@ -62,11 +81,10 @@ func (w *Worker) ApplyRouteQuality(n *core.Node) {
 		}
 		if n.RouteQuality == nil {
 			n.RouteQuality = make(map[string]core.RouteQuality)
-			n.Verified = slices.Clone(n.Verified)
 		}
 		n.RouteQuality[kind] = sample.RouteQuality
 		if sample.Published && !slices.Contains(n.Verified, kind) {
-			n.Verified = append(n.Verified, kind)
+			n.Verified = append(slices.Clone(n.Verified), kind)
 		}
 	}
 }
@@ -127,12 +145,20 @@ func (w *Worker) checkRoutes(ctx context.Context, publicURL string) {
 				w.routes[key] = make(map[string]routeSample)
 			}
 			sample := w.routes[key][kind]
-			if time.Since(sample.CheckedAt) > 20*time.Minute {
-				sample = routeSample{}
+			if sample.CheckedAt.IsZero() {
+				sample.RouteQuality = n.RouteQuality[kind]
+				sample.Weak = false
 			}
-			sample.record(err == nil, elapsed)
+			if time.Since(sample.CheckedAt) > 20*time.Minute {
+				sample.passes, sample.failures = 0, 0
+				sample.Published, sample.Weak = false, false
+			}
+			sample.record(err, elapsed)
 			w.routes[key][kind] = sample
 			w.routeMu.Unlock()
+			if err := w.Store.SaveRouteQuality(ctx, n.ID, kind, sample.RouteQuality); err != nil {
+				log.Printf("Route monitor: cannot save %s check for node %s: %v", kind, n.ID, err)
+			}
 		}
 	}
 	w.routeMu.Lock()

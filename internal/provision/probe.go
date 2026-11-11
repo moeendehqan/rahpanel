@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/rahpanel/rahpanel/internal/core"
-	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +13,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/rahpanel/rahpanel/internal/core"
+	"golang.org/x/net/proxy"
+)
+
+var (
+	errProbeStartup    = errors.New("probe client did not start")
+	errProbeConnection = errors.New("authenticated probe failed")
+	errProbeResponse   = errors.New("probe destination did not respond correctly")
 )
 
 // verifyTransport authenticates through the actual public inbound, then fetches
@@ -91,7 +99,7 @@ func probeTransport(ctx context.Context, binary []byte, n core.Node, kind, healt
 		}
 	}
 	if !ready {
-		return fmt.Errorf("probe client did not start")
+		return errProbeStartup
 	}
 	socks, e := proxy.SOCKS5("tcp", address, nil, &net.Dialer{Timeout: 10 * time.Second})
 	if e != nil {
@@ -114,7 +122,10 @@ func fetchProbeHealth(ctx context.Context, client *http.Client, healthURL string
 	}
 	res, e := client.Do(req)
 	if e != nil {
-		return fmt.Errorf("authenticated probe failed")
+		if errors.Is(e, context.DeadlineExceeded) {
+			return context.DeadlineExceeded
+		}
+		return errProbeConnection
 	}
 	defer res.Body.Close()
 	var body struct {
@@ -122,7 +133,7 @@ func fetchProbeHealth(ctx context.Context, client *http.Client, healthURL string
 		Status  string `json:"status"`
 	}
 	if e = json.NewDecoder(http.MaxBytesReader(nil, res.Body, 4096)).Decode(&body); e != nil || res.StatusCode != 200 || body.Service != "rahpanel" || body.Status != "ok" {
-		return fmt.Errorf("probe destination did not respond correctly")
+		return errProbeResponse
 	}
 	return nil
 }

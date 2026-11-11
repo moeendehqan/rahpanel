@@ -90,3 +90,54 @@ func TestDatabaseUnavailableDoesNotCreateAnInMemoryFallback(t *testing.T) {
 }
 
 var _ = sql.ErrNoRows
+
+func TestRouteQualitySurvivesStoreRestart(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; requires an isolated PostgreSQL database")
+	}
+	ctx := context.Background()
+	key := make([]byte, 32)
+	s, err := New(ctx, dsn, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+
+	id := core.ID()
+	node := core.Node{ID: id, Name: id, Host: id, Domain: id + ".example.com", GroupID: "default"}
+	if err = s.AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	checkedAt := time.Now().UTC().Truncate(time.Second)
+	failedAt := checkedAt.Add(-time.Minute)
+	want := core.RouteQuality{CheckedAt: checkedAt, LatencyMS: 125, LastError: "connection", LastErrorAt: &failedAt}
+	if err = s.SaveRouteQuality(ctx, id, "reality", want); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SaveRouteQuality(ctx, id, "trojan", core.RouteQuality{CheckedAt: checkedAt, LatencyMS: 210}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SaveRouteQuality(ctx, id, "reality", core.RouteQuality{CheckedAt: failedAt}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = s.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(ctx, dsn, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.DB.Close()
+	defer reopened.DB.ExecContext(ctx, "DELETE FROM nodes WHERE id=$1", id)
+	got, err := reopened.Node(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reality := got.RouteQuality["reality"]
+	if !reality.CheckedAt.Equal(checkedAt) || reality.LatencyMS != 125 || reality.LastError != "connection" ||
+		reality.LastErrorAt == nil || !reality.LastErrorAt.Equal(failedAt) || got.RouteQuality["trojan"].LatencyMS != 210 {
+		t.Fatalf("unexpected saved route quality: %+v", got.RouteQuality)
+	}
+}

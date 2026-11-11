@@ -271,7 +271,45 @@ function App(){
  </div>
 }
 function Empty({title,text}:{title:string;text:string}){return <div className="empty"><Network size={30}/><h3>{title}</h3><p>{text}</p></div>}
-function NodeList({nodes,groups,onEdit,onInstall,onToggle}:{nodes:VPNNode[];groups:Group[];onEdit?:(n:VPNNode)=>void;onInstall?:(n:VPNNode)=>void;onToggle?:(n:VPNNode)=>void}){return <section className="card node-list">{nodes.length===0?<Empty title="اولین سرور را اضافه کنید" text="IP و دسترسی SSH کافی است؛ نصب و ساخت اتصال‌ها از پنل انجام می‌شود."/>:<div className="table-wrap"><table><thead><tr><th>سرور</th><th>آدرس</th><th>وضعیت</th><th>روش‌های بررسی‌شده</th><th>عملیات</th></tr></thead><tbody>{nodes.map(n=><tr key={n.id}><td><div className="node-name"><span className="server-icon"><Server size={20}/></span><div><strong>{n.name}</strong><small>{groups.find(g=>g.id===n.group_id)?.name}{n.shared_host?' · سرور مشترک':''}</small></div></div></td><td><bdi className="mono">{n.host}</bdi><small className="mono">{n.domain}</small><small className="mono" dir="ltr">R:{n.ports?.reality||443} / WS:{n.ports?.websocket||8443} / T:{n.ports?.trojan||2053}</small></td><td><span className={'badge '+(online(n)?'good':'neutral')}><span className="dot"/>{!n.enabled?'غیرفعال':online(n)?'در دسترس':n.ready?'بدون ارتباط':'آماده نصب'}</span></td><td><div className="tags">{n.verified?.length?n.verified.map(p=><span className="tag mono" key={p} title={n.route_quality?.[p]?.checked_at ? new Date(n.route_quality[p].checked_at).toLocaleString("fa-IR") : undefined}>{p}{n.route_quality?.[p]?.weak ? " · پشتیبان" : n.route_quality?.[p]?.latency_ms ? ` · ${n.route_quality[p].latency_ms} ms` : ""}</span>):<span className="muted">پس از نصب</span>}</div></td><td><div className="actions">{onEdit&&<button className="text-btn" onClick={()=>onEdit(n)}>ویرایش</button>}{onInstall&&<button className="text-btn" onClick={()=>onInstall(n)}>{n.ready?'نصب مجدد':'راه‌اندازی'}<ArrowUpLeft size={14}/></button>}{onToggle&&<button className="text-btn" onClick={()=>onToggle(n)}>{n.enabled?'توقف':'فعال‌سازی'}</button>}</div></td></tr>)}</tbody></table></div>}</section>}
+const routeErrorLabels: Record<string, string> = {
+  timeout: 'پایان مهلت بررسی',
+  client_startup: 'کلاینت بررسی راه‌اندازی نشد',
+  connection: 'درخواست از طریق تونل ناموفق بود',
+  invalid_response: 'پاسخ نامعتبر از مقصد بررسی',
+  probe_error: 'خطا در اجرای بررسی',
+};
+
+function RouteCheckTime({value}: {value: string}) {
+  return <time dateTime={value}>{new Date(value).toLocaleString('fa-IR')}</time>;
+}
+
+function RouteChecks({node}: {node: VPNNode}) {
+  if (!node.ready && !node.verified?.length && !Object.keys(node.route_quality ?? {}).length) return <span className="muted">پس از نصب</span>;
+
+  return <div className="tags">{['reality', 'websocket', 'trojan'].map(protocol => {
+    const quality = node.route_quality?.[protocol];
+    const verified = node.verified?.includes(protocol);
+    return <details className="route-check" key={protocol}>
+      <summary>
+        <bdi className="mono">{protocol}</bdi>
+        {quality?.weak && verified && <span> · پشتیبان</span>}
+        {!verified && <span> · تأیید نشده</span>}
+      </summary>
+      <dl>
+        <dt>آخرین بررسی</dt>
+        <dd>{quality?.checked_at ? <RouteCheckTime value={quality.checked_at}/> : 'داده‌ای در دسترس نیست'}</dd>
+        <dt>تأخیر میانگین</dt>
+        <dd>{quality?.latency_ms ? <>{quality.latency_ms.toLocaleString('fa-IR')} میلی‌ثانیه</> : '—'}</dd>
+        <dt>علت آخرین خطا</dt>
+        <dd>{quality?.last_error ? (routeErrorLabels[quality.last_error] ?? routeErrorLabels.probe_error) : 'خطایی ثبت نشده'}</dd>
+        <dt>زمان آخرین خطا</dt>
+        <dd>{quality?.last_error_at ? <RouteCheckTime value={quality.last_error_at}/> : '—'}</dd>
+      </dl>
+    </details>;
+  })}</div>;
+}
+
+function NodeList({nodes,groups,onEdit,onInstall,onToggle}:{nodes:VPNNode[];groups:Group[];onEdit?:(n:VPNNode)=>void;onInstall?:(n:VPNNode)=>void;onToggle?:(n:VPNNode)=>void}){return <section className="card node-list">{nodes.length===0?<Empty title="اولین سرور را اضافه کنید" text="IP و دسترسی SSH کافی است؛ نصب و ساخت اتصال‌ها از پنل انجام می‌شود."/>:<div className="table-wrap"><table><thead><tr><th>سرور</th><th>آدرس</th><th>وضعیت</th><th>بررسی پروتکل‌ها</th><th>عملیات</th></tr></thead><tbody>{nodes.map(n=><tr key={n.id}><td><div className="node-name"><span className="server-icon"><Server size={20}/></span><div><strong>{n.name}</strong><small>{groups.find(g=>g.id===n.group_id)?.name}{n.shared_host?' · سرور مشترک':''}</small></div></div></td><td><bdi className="mono">{n.host}</bdi><small className="mono">{n.domain}</small><small className="mono" dir="ltr">R:{n.ports?.reality||443} / WS:{n.ports?.websocket||8443} / T:{n.ports?.trojan||2053}</small></td><td><span className={'badge '+(online(n)?'good':'neutral')}><span className="dot"/>{!n.enabled?'غیرفعال':online(n)?'در دسترس':n.ready?'بدون ارتباط':'آماده نصب'}</span></td><td><RouteChecks node={n}/></td><td><div className="actions">{onEdit&&<button className="text-btn" onClick={()=>onEdit(n)}>ویرایش</button>}{onInstall&&<button className="text-btn" onClick={()=>onInstall(n)}>{n.ready?'نصب مجدد':'راه‌اندازی'}<ArrowUpLeft size={14}/></button>}{onToggle&&<button className="text-btn" onClick={()=>onToggle(n)}>{n.enabled?'توقف':'فعال‌سازی'}</button>}</div></td></tr>)}</tbody></table></div>}</section>}
 function Login({onLogin}:{onLogin:()=>Promise<unknown>}){const [error,setError]=useState(''),[busy,setBusy]=useState(false);async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=new FormData(e.currentTarget);setBusy(true);setError('');try{await api('/login','POST',{username:f.get('username'),password:f.get('password')});await onLogin()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}return <main className="login"><div className="login-art"><Network size={72}/><h1>راهِ روشن برای<br/>مدیریت شبکه</h1><p>سرورها و کاربران، در یک فضای یکپارچه.</p><span>RAH / NETWORK CONTROL</span></div><section className="login-box"><span className="brandmark"><Network size={25}/></span><h1>به راه خوش آمدید</h1><p className="muted">برای مدیریت زیرساخت وارد حساب خود شوید.</p><form onSubmit={submit}><Field label="نام کاربری"><input name="username" dir="ltr" autoComplete="username" required/></Field><Field label="رمز عبور"><input name="password" dir="ltr" type="password" autoComplete="current-password" required/></Field>{error&&<p role="alert" className="form-error">{error}</p>}<button className="primary" disabled={busy}>{busy?'در حال ورود…':'ورود به پنل'}<ArrowUpLeft size={18}/></button></form><small className="muted">با نام کاربری و رمز عبور وارد شوید.</small></section></main>}
 function UserForm({user,groups,close,save}:{user:User|null;groups:Group[];close:()=>void;save:(v:unknown)=>Promise<void>}){
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);

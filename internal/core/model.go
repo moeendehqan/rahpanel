@@ -17,10 +17,12 @@ type Group struct {
 	Name string `json:"name"`
 }
 type RouteQuality struct {
-	Published bool      `json:"-"`
-	Weak      bool      `json:"weak"`
-	LatencyMS int64     `json:"latency_ms"`
-	CheckedAt time.Time `json:"checked_at"`
+	Published   bool       `json:"-"`
+	Weak        bool       `json:"weak"`
+	LatencyMS   int64      `json:"latency_ms"`
+	CheckedAt   time.Time  `json:"checked_at"`
+	LastError   string     `json:"last_error,omitempty"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
 }
 
 type Node struct {

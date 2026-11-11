@@ -109,7 +109,7 @@ func (s *Store) SaveUser(ctx context.Context, u core.User, create bool) error {
 	return nil
 }
 func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
-	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port,reality_behind_nginx,(client_serial<>'' OR ready) FROM nodes ORDER BY name`)
+	rows, e := s.DB.QueryContext(ctx, `SELECT id,name,host,domain,group_id,enabled,ready,verified,coalesce(last_seen,'epoch'),applied_version,last_error,reality_target,reality_sni,reality_private,reality_public,short_id,ws_path,shared_host,reality_port,websocket_port,trojan_port,stats_port,reality_behind_nginx,(client_serial<>'' OR ready),route_quality FROM nodes ORDER BY name`)
 	if e != nil {
 		return nil, e
 	}
@@ -117,8 +117,8 @@ func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
 	out := []core.Node{}
 	for rows.Next() {
 		var n core.Node
-		var secret, verified []byte
-		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.RealityBehindNginx, &n.PortsLocked); e != nil {
+		var secret, verified, routeQuality []byte
+		if e = rows.Scan(&n.ID, &n.Name, &n.Host, &n.Domain, &n.GroupID, &n.Enabled, &n.Ready, &verified, &n.LastSeen, &n.AppliedVersion, &n.LastError, &n.RealityTarget, &n.RealitySNI, &secret, &n.RealityPublic, &n.ShortID, &n.WSPath, &n.SharedHost, &n.Ports.Reality, &n.Ports.WebSocket, &n.Ports.Trojan, &n.Ports.Stats, &n.RealityBehindNginx, &n.PortsLocked, &routeQuality); e != nil {
 			return nil, e
 		}
 		n.RealityPrivate, e = core.Open(s.Key, secret)
@@ -128,10 +128,27 @@ func (s *Store) Nodes(ctx context.Context) ([]core.Node, error) {
 		if e = json.Unmarshal(verified, &n.Verified); e != nil {
 			return nil, e
 		}
+		if e = json.Unmarshal(routeQuality, &n.RouteQuality); e != nil {
+			return nil, e
+		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
 }
+func (s *Store) SaveRouteQuality(ctx context.Context, nodeID, protocol string, quality core.RouteQuality) error {
+	raw, err := json.Marshal(quality)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE nodes
+		SET route_quality = jsonb_set(route_quality, ARRAY[$2::text], $3::jsonb)
+		WHERE id = $1 AND (
+			(route_quality -> $2::text ->> 'checked_at')::timestamptz IS NULL OR
+			(route_quality -> $2::text ->> 'checked_at')::timestamptz < $4::timestamptz
+		)`, nodeID, protocol, raw, quality.CheckedAt)
+	return err
+}
+
 func (s *Store) Node(ctx context.Context, id string) (core.Node, error) {
 	all, e := s.Nodes(ctx)
 	if e != nil {

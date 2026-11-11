@@ -47,3 +47,9 @@ th small { display: block; margin-top: 3px; }
   .user-mobile-actions summary { cursor: pointer; min-height: 41px; padding: 8px; color: #36544b; font-size: 12px; }
   .user-mobile-actions .actions button { min-height: 36px; }
 }
+
+.route-check { flex-basis: 100%; }
+.route-check summary { cursor: pointer; }
+.route-check summary:focus-visible { outline: 2px solid #247966; outline-offset: 2px; }
+.route-check dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 5px 0 8px; white-space: normal; }
+.route-check dd { margin: 0; }
