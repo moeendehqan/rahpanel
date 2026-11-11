@@ -74,7 +74,7 @@ GitHub Actions must be able to reach the server, and the SSH user needs access t
 
 If the deployment or its health checks fail, the workflow attempts to restore the previous checkout and panel image using the existing database. See the [release recovery drill](docs/recovery-drill.md) for verification and manual recovery.
 
-The image build fetches a pinned Xray version from its official release and verifies its checksum. The templates were tested with `v25.3.6`. Changing versions requires compatibility testing and a new release. Nodes keep their pinned version until updated.
+The image build fetches a pinned Xray version from its official release and verifies its checksum. The templates were tested with `v26.3.27`. Changing versions requires compatibility testing and a new release. Nodes keep their pinned version until updated.
 
 ## Adding a node
 

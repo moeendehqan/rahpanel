@@ -93,7 +93,7 @@ func fetch(ctx context.Context, u string) ([]byte, error) {
 }
 func artifacts() {
 	fs := flag.NewFlagSet("artifacts", flag.ExitOnError)
-	version := fs.String("version", "v25.3.6", "explicit Xray release tag")
+	version := fs.String("version", "v26.3.27", "explicit Xray release tag")
 	dir := fs.String("dir", "artifacts", "artifact directory")
 	fs.Parse(os.Args[2:])
 	if !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(*version) {
