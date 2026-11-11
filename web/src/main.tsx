@@ -8,6 +8,16 @@ import {checkedPorts,defaultPorts,PortFields} from './node-ports';
 import type {Audit,Group,Job,Node as VPNNode,Settings,User} from './types';
 import './style.css';
 
+const userFilters=[
+ ['all','همه'],
+ ['expiring','نزدیک انقضا'],
+ ['nearQuota','نزدیک سقف مصرف'],
+ ['expired','منقضی‌شده'],
+] as const;
+type UserFilter=typeof userFilters[number][0];
+type UserSort='usage'|'expiry';
+const expiryChartDays=30;
+
 type Tab='overview'|'nodes'|'users'|'jobs'|'settings'|'audit';
 const menu=[['overview','نمای کلی',LayoutDashboard],['nodes','سرورها',Server],['users','کاربران',Users],['jobs','عملیات نصب',Activity],['settings','تنظیمات',SettingsIcon],['audit','رویدادها',ShieldCheck]] as const;
 const fa=(n:number)=>n.toLocaleString('fa-IR');
@@ -75,6 +85,8 @@ function App(){
  const [account,setAccount]=useState<{username:string;role:string}|null>(null),[checking,setChecking]=useState(true),[tab,setTab]=useState<Tab>('overview');
  const [users,setUsers]=useState<User[]>([]),[nodes,setNodes]=useState<VPNNode[]>([]),[groups,setGroups]=useState<Group[]>([]),[jobs,setJobs]=useState<Job[]>([]),[audit,setAudit]=useState<Audit[]>([]);
  const [settings,setSettings]=useState<Settings>(initialSettings),[hasToken,setHasToken]=useState(false),[configured,setConfigured]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false);
+ const [userFilter,setUserFilter]=useState<UserFilter>('all');
+ const [userSort,setUserSort]=useState<{key:UserSort;descending:boolean}|null>(null);
  const [modal,setModal]=useState<'user'|'node'|'group'|null>(null),[editing,setEditing]=useState<User|null>(null),[subscription,setSubscription]=useState<User|null>(null),[installing,setInstalling]=useState<VPNNode|null>(null),[search,setSearch]=useState('');
  const [renaming,setRenaming]=useState<VPNNode|null>(null);
  async function load(){const [u,n,g,j]=await Promise.all([api<User[]>('/users'),api<VPNNode[]>('/nodes'),api<Group[]>('/groups'),api<Job[]>('/jobs')]);setUsers(u);setNodes(n);setGroups(g);setJobs(j);setLoaded(true)}
@@ -109,6 +121,43 @@ function App(){
  async function perform(fn:()=>Promise<unknown>,message:string){setError('');setNotice('');setBusy(true);try{await fn();await load();setNotice(message)}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
  if(checking)return <main className="login"><p>در حال اتصال به پنل…</p></main>;
  if(!account)return <Login onLogin={()=>api<{username:string;role:string}>('/me').then(setAccount)}/>;
+ const now=Date.now();
+ const userRows=tab==='users'?users.map(user=>{
+   const remainingDays=Math.max(0,(Date.parse(user.expires_at)-now)/86_400_000);
+   const usage=user.quota_bytes>0?user.used_bytes/user.quota_bytes:null;
+   const expired=remainingDays===0;
+   const status=!user.enabled?'تعلیق‌شده':expired?'منقضی‌شده':usage!==null&&usage>=1?'سهمیه تمام شده':'فعال';
+   return {user,remainingDays,usage,status,all:true,expired,
+     expiring:!expired&&remainingDays<=3,nearQuota:usage!==null&&usage>=0.8&&usage<1};
+ }):[];
+ const searchedUserRows=userRows.filter(({user})=>user.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+ const visibleUserRows=searchedUserRows.filter(row=>row[userFilter]);
+ if(userSort){
+   const {key,descending}=userSort;
+   const direction=descending?-1:1;
+   visibleUserRows.sort((a,b)=>{
+     if(key==='expiry')return direction*(a.remainingDays-b.remainingDays);
+     if(a.usage===null)return b.usage===null?0:1;
+     if(b.usage===null)return -1;
+     return direction*(a.usage-b.usage);
+   });
+ }
+ function toggleUserSort(key:UserSort){
+   setUserSort(previous=>({key,descending:previous?.key===key?!previous.descending:key==='usage'}));
+ }
+ function userSortDirection(key:UserSort){
+   return userSort?.key===key?(userSort.descending?'descending':'ascending'):undefined;
+ }
+ async function copySubscription(user:User){
+   try{
+     await navigator.clipboard.writeText(subscriptionLink(settings.public_url||location.origin,user));
+     setError('');
+     setNotice('لینک اشتراک کپی شد');
+   }catch{
+     setNotice('');
+     setSubscription(user);
+   }
+ }
  const live=nodes.filter(n=>online(n)).length,active=users.filter(u=>u.enabled&&Date.parse(u.expires_at)>Date.now()&&(!u.quota_bytes||u.used_bytes<u.quota_bytes)).length;
  const used=users.reduce((n,u)=>n+u.used_bytes,0),canEdit=account.role==='admin';
  return <div className="app"><aside className="sidebar"><a href="#" className="brand" onClick={e=>{e.preventDefault();setTab('overview')}}><span className="brandmark"><Network size={24}/></span><strong>راه<span>مدیریت یکپارچه شبکه</span></strong></a><div className="workspace"><span className="workspace-dot"/>فضای مدیریت<span className="version">نسخه ۰.۱</span></div><nav aria-label="منوی اصلی">{menu.map(([id,label,Icon])=><button key={id} aria-current={tab===id?'page':undefined} className={tab===id?'selected':''} onClick={()=>{setTab(id);setSearch('');setError('')}}><Icon size={19}/>{label}{id==='nodes'&&<small>{fa(nodes.length)}</small>}{id==='users'&&<small>{fa(users.length)}</small>}</button>)}</nav><div className="sidebar-note"><ShieldCheck size={22}/><strong>کنترل در دست شماست</strong><p>یک پنل برای سرورها، اتصال‌ها و کاربران شما.</p></div><div className="profile"><span className="avatar">{account.username.slice(0,1).toUpperCase()}</span><div><strong>{account.username}</strong><small>{canEdit?'مدیر سیستم':'مشاهده‌گر'}</small></div><button className="icon" aria-label="خروج" onClick={()=>api('/logout','POST').then(()=>{setAccount(null);setLoaded(false)})}><LogOut size={18}/></button></div></aside>
@@ -117,7 +166,71 @@ function App(){
  {error&&<div role="alert" className="banner error"><AlertCircle size={18}/>{error}<button className="icon" aria-label="بستن خطا" onClick={()=>setError('')}><X size={16}/></button></div>}{notice&&<div role="status" className="banner success"><CheckCircle2 size={18}/>{notice}</div>}
  {tab==='overview'&&<><section className="stats" aria-label="آمار شبکه">{[[Server,'سرورهای در دسترس',fa(live),`از ${fa(nodes.length)} سرور ثبت‌شده`],[Users,'کاربران فعال',fa(active),`از ${fa(users.length)} کاربر`],[Globe2,'مصرف کاربران',bytes(used),'مجموع ارسال و دریافت'],[Activity,'عملیات در حال اجرا',fa(jobs.filter(j=>['queued','running'].includes(j.status)).length),'نصب و راه‌اندازی سرورها']].map(([Icon,label,value,description])=>{const I=Icon as typeof Server;return <article className="stat" key={String(label)}><div className="stat-top"><span>{String(label)}</span><I size={19}/></div><strong>{String(value)}</strong><small>{String(description)}</small></article>})}</section><div className="section-heading"><h2>زیرساخت شبکه <span className="count">{fa(nodes.length)}</span></h2><button className="text-btn" onClick={()=>setTab('nodes')}>همه سرورها <ArrowUpLeft size={16}/></button></div><NodeList nodes={nodes.slice(0,4)} groups={groups} onEdit={canEdit?setRenaming:undefined} onInstall={canEdit?setInstalling:undefined} onToggle={canEdit?n=>perform(()=>api('/nodes/'+n.id,'PUT',{enabled:!n.enabled}),'وضعیت سرور تغییر کرد'):undefined}/><section className="bottom-grid"><article className="card"><div className="section-heading"><h2>مسیر راه‌اندازی</h2><span className="tag">شروع سریع</span></div>{[['تنظیم دامنه و سرویس DNS','settings'],['معرفی سرور و نصب خودکار','nodes'],['ساخت کاربر و دریافت اشتراک','users']].map(([label,destination],i)=><button className="setup-step" key={label} onClick={()=>setTab(destination as Tab)}><span>{fa(i+1)}</span><strong>{label}</strong><ChevronLeft size={17}/></button>)}</article><article className="card connection-note"><div className="note-icon"><Network size={25}/></div><h2>چند مسیر، یک اشتراک</h2><p>REALITY، WebSocket و Trojan در یک لینک اشتراک برای کلاینت‌های آماده؛ فقط اتصال‌های بررسی‌شده منتشر می‌شوند.</p><span className="mono">VLESS / TLS / REALITY</span></article></section></>}
  {tab==='nodes'&&<><div className="toolbar"><input aria-label="جست‌وجوی سرورها" placeholder="جست‌وجوی نام یا IP سرور…" value={search} onChange={e=>setSearch(e.target.value)}/>{canEdit&&<button className="secondary" onClick={()=>setModal('group')}>گروه جدید</button>}</div><NodeList nodes={nodes.filter(n=>(n.name+n.host).includes(search))} groups={groups} onEdit={canEdit?setRenaming:undefined} onInstall={canEdit?setInstalling:undefined} onToggle={canEdit?n=>perform(()=>api('/nodes/'+n.id,'PUT',{enabled:!n.enabled}),'وضعیت سرور تغییر کرد'):undefined}/></>}
- {tab==='users'&&<section className="card"><div className="toolbar"><input aria-label="جست‌وجوی کاربران" placeholder="جست‌وجوی کاربر…" value={search} onChange={e=>setSearch(e.target.value)}/><span className="muted">{fa(users.length)} کاربر</span></div><div className="table-wrap"><table><thead><tr><th>کاربر</th><th>وضعیت</th><th>مصرف / سهمیه</th><th>انقضا</th><th>عملیات</th></tr></thead><tbody>{users.filter(u=>u.name.includes(search)).map(u=><tr key={u.id}><td><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small></td><td><span className={'badge '+(u.enabled?'good':'neutral')}>{u.enabled?'فعال':'تعلیق'}</span></td><td dir="ltr">{bytes(u.used_bytes)} / {u.quota_bytes?bytes(u.quota_bytes):'∞'}</td><td>{new Date(u.expires_at).toLocaleDateString('fa-IR-u-ca-persian',{timeZone:expiryTimeZone})}</td><td><div className="actions"><button className="text-btn" onClick={()=>setSubscription(u)}>اشتراک</button>{canEdit&&<><button className="text-btn" onClick={()=>{setEditing(u);setModal('user')}}>ویرایش</button><button className="text-btn" onClick={()=>perform(()=>api('/users/'+u.id,'PUT',{...u,enabled:!u.enabled}), 'وضعیت کاربر تغییر کرد')}>{u.enabled?'تعلیق':'فعال‌سازی'}</button><button className="text-btn danger" onClick={()=>{if(confirm('کاربر و اعتبارنامه‌های او حذف شوند؟'))perform(()=>api('/users/'+u.id,'DELETE'),'کاربر حذف شد')}}>حذف</button></>}</div></td></tr>)}</tbody></table></div>{users.length===0&&<Empty title="هنوز کاربری ندارید" text="پس از نصب اولین سرور، یک کاربر بسازید و اشتراک او را دریافت کنید."/>}</section>}
+ {tab==='users'&&<section className="card users-card">
+   <div className="toolbar users-toolbar">
+     <input type="search" aria-label="جست‌وجوی کاربران" placeholder="جست‌وجوی کاربر…" value={search} onChange={e=>setSearch(e.target.value)}/>
+     <span className="muted" aria-live="polite">{fa(visibleUserRows.length)} از {fa(users.length)} کاربر</span>
+   </div>
+   <div className="user-filters" role="group" aria-label="فیلتر کاربران">
+     {userFilters.map(([key,label])=><button key={key} type="button" aria-pressed={userFilter===key} onClick={()=>setUserFilter(key)}>
+       {label} <span>{fa(searchedUserRows.filter(row=>row[key]).length)}</span>
+     </button>)}
+   </div>
+   {visibleUserRows.length>0&&<>
+     <div className="users-mobile-sort" role="group" aria-label="مرتب‌سازی کاربران">
+       <button className="secondary" onClick={()=>toggleUserSort('usage')}>مصرف سهمیه {userSort?.key==='usage'&&(userSort.descending?'↓':'↑')}</button>
+       <button className="secondary" onClick={()=>toggleUserSort('expiry')}>زمان باقی‌مانده {userSort?.key==='expiry'&&(userSort.descending?'↓':'↑')}</button>
+     </div>
+     <div className="table-wrap users-table-wrap"><table className="users-table" role="table" aria-label="مصرف و اعتبار کاربران">
+       <thead role="rowgroup"><tr role="row">
+         <th scope="col">کاربر</th><th scope="col">وضعیت</th>
+         <th scope="col" aria-sort={userSortDirection('usage')}><button className="user-sort" onClick={()=>toggleUserSort('usage')}>مصرف / سهمیه <span aria-hidden="true">{userSort?.key==='usage'?(userSort.descending?'↓':'↑'):'↕'}</span></button></th>
+         <th scope="col" aria-sort={userSortDirection('expiry')}><button className="user-sort" onClick={()=>toggleUserSort('expiry')}>زمان باقی‌مانده <span aria-hidden="true">{userSort?.key==='expiry'?(userSort.descending?'↓':'↑'):'↕'}</span></button><small>مقیاس نمودار: ۳۰ روز</small></th>
+         <th scope="col">عملیات</th>
+       </tr></thead>
+       <tbody role="rowgroup">{visibleUserRows.map(({user:u,remainingDays,usage,status})=>{
+         const adminActions=canEdit&&<>
+           <button className="text-btn" onClick={()=>{setEditing(u);setModal('user')}}>ویرایش</button>
+           <button className="text-btn" onClick={()=>perform(()=>api('/users/'+u.id,'PUT',{...u,enabled:!u.enabled}),'وضعیت کاربر تغییر کرد')}>{u.enabled?'تعلیق':'فعال‌سازی'}</button>
+           <button className="text-btn danger" onClick={()=>{if(confirm('کاربر و اعتبارنامه‌های او حذف شوند؟'))perform(()=>api('/users/'+u.id,'DELETE'),'کاربر حذف شد')}}>حذف</button>
+         </>;
+         return <tr role="row" key={u.id}>
+           <th role="rowheader" scope="row" className="user-name"><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small></th>
+           <td role="cell" className="user-status"><span className={'badge '+(status==='فعال'?'good':u.enabled?'user-warning':'neutral')}>{status}</span></td>
+           <td role="cell" className="user-metric">
+             <span className="user-mobile-label">مصرف / سهمیه</span>
+             <bdi dir="ltr">{bytes(u.used_bytes)}{usage!==null&&<> / {bytes(u.quota_bytes)}</>}</bdi>
+             {usage!==null ? <>
+               <small>{fa(Math.floor(100*usage))}٪ از سهمیه</small>
+               <meter className="usage-meter" aria-label="مصرف نسبت به سهمیه" max={u.quota_bytes} value={Math.min(u.used_bytes,u.quota_bytes)}/>
+             </> : <small>سهمیه نامحدود</small>}
+           </td>
+           <td role="cell" className="user-metric">
+             <span className="user-mobile-label">زمان باقی‌مانده · مقیاس ۳۰ روز</span>
+             <span>{remainingDays===0?'منقضی شده':remainingDays<1?'کمتر از یک روز':fa(Math.floor(remainingDays))+' روز'}</span>
+             <small>انقضا: {new Date(u.expires_at).toLocaleDateString('fa-IR-u-ca-persian',{timeZone:expiryTimeZone})}</small>
+             <meter className="expiry-meter" aria-label="زمان باقی‌مانده در مقیاس ۳۰ روز" max={expiryChartDays} value={Math.min(remainingDays,expiryChartDays)}/>
+           </td>
+           <td role="cell" className="user-actions">
+             <div className="actions user-desktop-actions"><button className="text-btn" onClick={()=>setSubscription(u)}>اشتراک</button>{adminActions}</div>
+             <div className="user-mobile-actions">
+               <button className="secondary" onClick={()=>copySubscription(u)}><Copy size={15}/>کپی لینک اشتراک</button>
+               <details>
+                 <summary aria-label={'عملیات بیشتر برای '+u.name}>بیشتر</summary>
+                 <div className="actions" onClick={e=>{if((e.target as HTMLElement).closest('button'))e.currentTarget.closest('details')?.removeAttribute('open')}}>
+                   <button className="text-btn" onClick={()=>setSubscription(u)}>جزئیات اشتراک</button>{adminActions}
+                 </div>
+               </details>
+             </div>
+           </td>
+         </tr>;
+       })}</tbody>
+     </table></div>
+   </>}
+   {loaded&&visibleUserRows.length===0&&(users.length===0
+     ?<Empty title="هنوز کاربری ندارید" text="پس از نصب اولین سرور، یک کاربر بسازید و اشتراک او را دریافت کنید."/>
+     :<Empty title="کاربری پیدا نشد" text="فیلتر یا عبارت جست‌وجو را تغییر دهید."/>)}
+ </section>}
  {tab==='jobs'&&<section className="card"><div className="section-heading"><h2>آخرین عملیات</h2><span className="muted">به‌روزرسانی هر ۱۰ ثانیه</span></div>{jobs.length===0?<Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/>:jobs.map(j=><div className="job" key={j.id}><span className={'job-icon '+(j.status==='completed'?'good':'')}><Clock size={20}/></span><div><strong>{nodes.find(n=>n.id===j.node_id)?.name||j.node_id}</strong><small><bdi>{j.step}</bdi> · {new Date(j.updated_at).toLocaleString('fa-IR')}</small>{j.error&&<p className="job-error">{j.error}</p>}</div><span className="badge neutral">{({queued:'در صف',running:'در حال اجرا',completed:'تکمیل‌شده',failed:'ناموفق',interrupted:'متوقف‌شده'} as Record<string,string>)[j.status]||j.status}</span></div>)}</section>}
  {tab==='settings'&&canEdit&&<PasswordForm username={account.username}/>}
  {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{
@@ -248,5 +361,6 @@ function InstallForm({node,close,save}:{node:VPNNode;close:()=>void;save:(v:unkn
  {fp&&<><div className="fingerprint"><ShieldCheck size={20}/><code dir="ltr">{fp}</code></div><Field label="نام کاربری SSH (root یا sudo بدون تعامل)"><input name="username" dir="ltr" defaultValue="root" autoComplete="off" required/></Field><Field label="نوع دسترسی"><select value={mode} onChange={e=>setMode(e.target.value)}><option value="password">رمز عبور</option><option value="key">کلید خصوصی</option></select></Field>{mode==='password'?<Field label="رمز SSH"><input name="password" type="password" autoComplete="off" required/></Field>:<Field label="کلید خصوصی بدون گذرواژه"><textarea name="private_key" dir="ltr" rows={5} required/></Field>}<label className="checkbox"><input type="checkbox" required/>اثر انگشت سرور را تأیید می‌کنم.</label></>}
  {error&&<p role="alert" className="form-error">{error}</p>}<button className="primary" disabled={busy}>{busy?'در حال بررسی…':fp?'تأیید و نصب خودکار':'دریافت اثر انگشت SSH'}</button></form></Modal>
 }
-function Subscription({user,base,close,rotate}:{user:User;base:string;close:()=>void;rotate:()=>void}){const link=base+'/sub/'+user.token;const [copied,setCopied]=useState(false),[error,setError]=useState('');return <Modal title={'اشتراک '+user.name} close={close}><div className="qr"><QRCodeSVG value={link} size={190} marginSize={3}/></div><p>این لینک را در بخش اشتراک کلاینت وارد و به‌روزرسانی کنید. برای پوشش دستگاه، حالت VPN یا TUN را فعال کنید.</p><div className="copy-row"><input readOnly dir="ltr" aria-label="لینک اشتراک" value={link}/><button className="secondary" aria-label="کپی لینک" onClick={()=>navigator.clipboard.writeText(link).then(()=>setCopied(true)).catch(()=>setError('کپی خودکار ممکن نشد؛ لینک را دستی کپی کنید.'))}>{copied?<Check size={18}/>:<Copy size={18}/>}</button></div>{error&&<p role="alert">{error}</p>}<p className="muted">لینک اشتراک محرمانه است. ابطال لینک، کانفیگ‌های قبلاً دریافت‌شده را باطل نمی‌کند.</p><button className="secondary danger" onClick={()=>{if(confirm('لینک فعلی باطل و لینک جدید صادر شود؟'))rotate()}}>ابطال و صدور لینک جدید</button></Modal>}
+function subscriptionLink(base:string,user:User){return base.replace(/\/$/,'')+'/sub/'+user.token}
+function Subscription({user,base,close,rotate}:{user:User;base:string;close:()=>void;rotate:()=>void}){const link=subscriptionLink(base,user);const [copied,setCopied]=useState(false),[error,setError]=useState('');return <Modal title={'اشتراک '+user.name} close={close}><div className="qr"><QRCodeSVG value={link} size={190} marginSize={3}/></div><p>این لینک را در بخش اشتراک کلاینت وارد و به‌روزرسانی کنید. برای پوشش دستگاه، حالت VPN یا TUN را فعال کنید.</p><div className="copy-row"><input readOnly dir="ltr" aria-label="لینک اشتراک" value={link}/><button className="secondary" aria-label="کپی لینک" onClick={()=>navigator.clipboard.writeText(link).then(()=>setCopied(true)).catch(()=>setError('کپی خودکار ممکن نشد؛ لینک را دستی کپی کنید.'))}>{copied?<Check size={18}/>:<Copy size={18}/>}</button></div>{error&&<p role="alert">{error}</p>}<p className="muted">لینک اشتراک محرمانه است. ابطال لینک، کانفیگ‌های قبلاً دریافت‌شده را باطل نمی‌کند.</p><button className="secondary danger" onClick={()=>{if(confirm('لینک فعلی باطل و لینک جدید صادر شود؟'))rotate()}}>ابطال و صدور لینک جدید</button></Modal>}
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
