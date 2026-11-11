@@ -76,7 +76,10 @@ def plan():
                         raise ValueError("REALITY SNI overlaps an existing Nginx server name")
             if len(words) > 1 and words[0] == "listen" and (words[1] == "443" or words[1].endswith(":443")):
                 address, *options = words[1:]
-                if address not in ("443", "*:443", "0.0.0.0:443", "[::]:443") or "ssl" not in options or set(options) - {"ssl", "default_server", "http2"}:
+                allowed = {"ssl", "default_server", "http2"}
+                if address == "[::]:443":
+                    allowed.add("ipv6only=on")  # Certbot sets the IPv6 default explicitly.
+                if address not in ("443", "*:443", "0.0.0.0:443", "[::]:443") or "ssl" not in options or set(options) - allowed:
                     raise ValueError("automatic sharing requires standard wildcard TLS listeners on TCP 443")
                 family = "::1" if address == "[::]:443" else "127.0.0.1"
                 families.add(family)
