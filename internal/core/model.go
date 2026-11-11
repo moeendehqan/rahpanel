@@ -16,27 +16,35 @@ type Group struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
+type RouteQuality struct {
+	Published bool      `json:"-"`
+	Weak      bool      `json:"weak"`
+	LatencyMS int64     `json:"latency_ms"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
 type Node struct {
-	SharedHost     bool      `json:"shared_host"`
-	Ports          NodePorts `json:"ports"`
-	PortsLocked    bool      `json:"ports_locked"`
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Host           string    `json:"host"`
-	Domain         string    `json:"domain"`
-	GroupID        string    `json:"group_id"`
-	Enabled        bool      `json:"enabled"`
-	Ready          bool      `json:"ready"`
-	Verified       []string  `json:"verified"`
-	LastSeen       time.Time `json:"last_seen"`
-	AppliedVersion string    `json:"applied_version"`
-	LastError      string    `json:"last_error"`
-	RealityTarget  string    `json:"reality_target"`
-	RealitySNI     string    `json:"reality_sni"`
-	RealityPrivate string    `json:"-"`
-	RealityPublic  string    `json:"reality_public"`
-	ShortID        string    `json:"short_id"`
-	WSPath         string    `json:"ws_path"`
+	RouteQuality   map[string]RouteQuality `json:"route_quality,omitempty"`
+	SharedHost     bool                    `json:"shared_host"`
+	Ports          NodePorts               `json:"ports"`
+	PortsLocked    bool                    `json:"ports_locked"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Host           string                  `json:"host"`
+	Domain         string                  `json:"domain"`
+	GroupID        string                  `json:"group_id"`
+	Enabled        bool                    `json:"enabled"`
+	Ready          bool                    `json:"ready"`
+	Verified       []string                `json:"verified"`
+	LastSeen       time.Time               `json:"last_seen"`
+	AppliedVersion string                  `json:"applied_version"`
+	LastError      string                  `json:"last_error"`
+	RealityTarget  string                  `json:"reality_target"`
+	RealitySNI     string                  `json:"reality_sni"`
+	RealityPrivate string                  `json:"-"`
+	RealityPublic  string                  `json:"reality_public"`
+	ShortID        string                  `json:"short_id"`
+	WSPath         string                  `json:"ws_path"`
 
 	RealityBehindNginx bool `json:"-"`
 }

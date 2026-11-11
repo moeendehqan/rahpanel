@@ -26,10 +26,12 @@ type Request struct {
 	SSH           SSHCredentials
 }
 type Worker struct {
-	Store  *store.Store
-	CA     *security.Authority
-	Queue  chan Request
-	certMu sync.Mutex
+	Store   *store.Store
+	CA      *security.Authority
+	Queue   chan Request
+	certMu  sync.Mutex
+	routeMu sync.RWMutex
+	routes  map[routeKey]map[string]routeSample
 }
 
 func NewWorker(s *store.Store, ca *security.Authority) *Worker {

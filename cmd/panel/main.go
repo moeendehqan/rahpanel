@@ -89,6 +89,7 @@ func main() {
 	api := server.New(s, w, public, env("WEB_DIR", "web/dist"), env("INSECURE_DEV", "false") != "true")
 	api.AgentURL = agentURL
 	go w.Run(ctx)
+	go w.MonitorRoutes(ctx, public)
 	go maintain(ctx, s, w, refresh)
 	admin := &http.Server{Addr: env("HTTP_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	nodes := &http.Server{Addr: env("AGENT_ADDR", ":9443"), Handler: api.AgentHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return endpointIdentity.Load(), nil }, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}}

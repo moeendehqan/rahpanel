@@ -232,6 +232,9 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "Cannot list nodes")
 		return
 	}
+	for i := range v {
+		s.Worker.ApplyRouteQuality(&v[i])
+	}
 	write(w, 200, v)
 }
 func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
@@ -588,6 +591,7 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 				creds = append(creds, c)
 			}
 		}
+		s.Worker.ApplyRouteQuality(&n)
 		allowed = append(allowed, n)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

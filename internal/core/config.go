@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,7 +78,11 @@ func ProbeCredential(n Node) Credential {
 }
 
 func Subscription(nodes []Node, creds []Credential) string {
-	lines := []string{}
+	type routeLine struct {
+		url     string
+		quality RouteQuality
+	}
+	var routes []routeLine
 	for _, n := range nodes {
 		if !n.Ready {
 			continue
@@ -122,9 +127,23 @@ func Subscription(nodes []Node, creds []Credential) string {
 					continue
 				}
 				u := url.URL{Scheme: scheme, User: url.User(secret), Host: net.JoinHostPort(host, strconv.Itoa(port)), RawQuery: q.Encode(), Fragment: n.Name + " · " + kind}
-				lines = append(lines, u.String())
+				routes = append(routes, routeLine{u.String(), n.RouteQuality[kind]})
 			}
 		}
+	}
+	sort.SliceStable(routes, func(i, j int) bool {
+		a, b := routes[i].quality, routes[j].quality
+		if a.Weak != b.Weak {
+			return !a.Weak
+		}
+		if (a.LatencyMS == 0) != (b.LatencyMS == 0) {
+			return a.LatencyMS > 0
+		}
+		return a.LatencyMS < b.LatencyMS
+	})
+	lines := make([]string, 0, len(routes))
+	for _, r := range routes {
+		lines = append(lines, r.url)
 	}
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n")))
 }

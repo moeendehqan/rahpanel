@@ -23,6 +23,10 @@ func verifyTransport(ctx context.Context, n core.Node, kind, healthURL string) e
 	if e != nil {
 		return e
 	}
+	return probeTransport(ctx, binary, n, kind, healthURL)
+}
+
+func probeTransport(ctx context.Context, binary []byte, n core.Node, kind, healthURL string) error {
 	dir, e := os.MkdirTemp("", "rah-probe-*")
 	if e != nil {
 		return e
@@ -100,8 +104,15 @@ func verifyTransport(ctx context.Context, n core.Node, kind, healthURL string) e
 	transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 	defer transport.CloseIdleConnections()
 	httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	req, _ := http.NewRequestWithContext(c, "GET", healthURL+"/healthz", nil)
-	res, e := httpClient.Do(req)
+	return fetchProbeHealth(c, httpClient, healthURL)
+}
+
+func fetchProbeHealth(ctx context.Context, client *http.Client, healthURL string) error {
+	req, e := http.NewRequestWithContext(ctx, "GET", healthURL+"/healthz", nil)
+	if e != nil {
+		return e
+	}
+	res, e := client.Do(req)
 	if e != nil {
 		return fmt.Errorf("authenticated probe failed")
 	}
