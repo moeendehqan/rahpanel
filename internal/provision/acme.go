@@ -51,7 +51,7 @@ func IssueCertificate(ctx context.Context, s *store.Store, cfg Settings, domain 
 		directory = acme.LetsEncryptURL
 	}
 	client := &acme.Client{Key: account, DirectoryURL: directory}
-	if _, e = client.Register(ctx, &acme.Account{Contact: []string{"mailto:" + cfg.Email}}, acme.AcceptTOS); e != nil {
+	if _, e = client.Register(ctx, &acme.Account{Contact: []string{"mailto:" + cfg.Email}}, acme.AcceptTOS); e != nil && !errors.Is(e, acme.ErrAccountAlreadyExists) {
 		return Certificate{}, fmt.Errorf("ACME account registration failed")
 	}
 	order, e := client.AuthorizeOrder(ctx, acme.DomainIDs(domain))
