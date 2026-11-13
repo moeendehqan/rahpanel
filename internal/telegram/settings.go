@@ -44,29 +44,23 @@ func WatchSettings(ctx context.Context, s *store.Store, public string, test bool
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 	var active Settings
-	var stop context.CancelFunc
-	var done chan struct{}
-	defer func() {
-		if stop != nil {
-			stop()
-			<-done
-		}
-	}()
+	stop := func() {}
+	defer func() { stop() }()
 	for ctx.Err() == nil {
 		next, err := LoadSettings(ctx, s, fallback)
 		if err != nil {
 			log.Print("Cannot read Telegram bot settings")
 		} else if next != active {
-			if stop != nil {
-				stop()
-				<-done
-				stop = nil
-			}
+			stop()
+			stop = func() {}
 			active = next
 			if next.Token != "" && next.Validate() == nil {
-				var botCtx context.Context
-				botCtx, stop = context.WithCancel(ctx)
-				done = make(chan struct{})
+				botCtx, cancel := context.WithCancel(ctx)
+				done := make(chan struct{})
+				stop = func() {
+					cancel()
+					<-done
+				}
 				bot := Bot{Store: s, Token: next.Token, PublicURL: public, Terms: next.Terms, Support: next.Support, Test: test}
 				go func(finished chan struct{}) {
 					defer close(finished)
