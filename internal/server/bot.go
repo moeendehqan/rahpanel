@@ -2,10 +2,52 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/rahpanel/rahpanel/internal/store"
+	"github.com/rahpanel/rahpanel/internal/telegram"
 )
+
+func (s *Server) botSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	current, err := telegram.LoadSettings(r.Context(), s.Store, telegram.Settings{
+		Token: os.Getenv("TELEGRAM_BOT_TOKEN"), Terms: os.Getenv("TELEGRAM_BOT_TERMS"), Support: os.Getenv("TELEGRAM_BOT_SUPPORT"),
+	})
+	if err != nil {
+		problem(w, 500, "Cannot load bot settings")
+		return
+	}
+	if r.Method == "PUT" {
+		var input struct {
+			telegram.Settings
+			RemoveToken bool `json:"remove_token"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		input.Token = strings.TrimSpace(input.Token)
+		input.Terms = strings.TrimSpace(input.Terms)
+		input.Support = strings.TrimSpace(input.Support)
+		if input.RemoveToken {
+			input.Token = ""
+		} else if input.Token == "" {
+			input.Token = current.Token
+		}
+		current = input.Settings
+		if err := current.Validate(); err != nil {
+			problem(w, 400, err.Error())
+			return
+		}
+		if err := s.Store.SetSetting(r.Context(), telegram.SettingsKey, current); err != nil {
+			problem(w, 500, "Cannot save bot settings")
+			return
+		}
+		s.auditAction(r, "bot.settings.save", telegram.SettingsKey)
+	}
+	write(w, 200, map[string]any{"has_token": current.Token != "", "terms": current.Terms, "support": current.Support})
+}
 
 func (s *Server) botPlans(w http.ResponseWriter, r *http.Request) {
 	plans, err := s.Store.BotPlans(r.Context())

@@ -90,17 +90,13 @@ func main() {
 	api := server.New(s, w, public, env("WEB_DIR", "web/dist"), env("INSECURE_DEV", "false") != "true")
 	api.AgentURL = agentURL
 	go w.Run(ctx)
+	go s.MaintainUsage(ctx)
+	go api.RunWebhooks(ctx)
 	go w.MonitorRoutes(ctx, public)
 	go maintain(ctx, s, w, refresh)
-	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
-		terms, support := os.Getenv("TELEGRAM_BOT_TERMS"), os.Getenv("TELEGRAM_BOT_SUPPORT")
-		if terms == "" || support == "" || len([]rune(terms)) > 3500 || len([]rune(support)) > 3500 {
-			log.Print("Telegram bot disabled: configure purchase terms and payment support (up to 3500 characters each)")
-		} else {
-			bot := telegram.Bot{Store: s, Token: token, PublicURL: public, Terms: terms, Support: support, Test: os.Getenv("TELEGRAM_BOT_TEST") == "true"}
-			go bot.Run(ctx)
-		}
-	}
+	go telegram.WatchSettings(ctx, s, public, os.Getenv("TELEGRAM_BOT_TEST") == "true", telegram.Settings{
+		Token: os.Getenv("TELEGRAM_BOT_TOKEN"), Terms: os.Getenv("TELEGRAM_BOT_TERMS"), Support: os.Getenv("TELEGRAM_BOT_SUPPORT"),
+	})
 	admin := &http.Server{Addr: env("HTTP_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	nodes := &http.Server{Addr: env("AGENT_ADDR", ":9443"), Handler: api.AgentHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return endpointIdentity.Load(), nil }, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}}
 	go func() {

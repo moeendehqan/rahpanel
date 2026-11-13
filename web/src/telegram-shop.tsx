@@ -74,6 +74,7 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
  }
 
  return <>
+  {canEdit&&<TelegramSettings/>}
   {error&&<p role="alert" className="form-error">{error}</p>}
   <div className="section-heading"><h2>پلن‌های بات</h2>{canEdit&&<button className="primary" onClick={()=>setEditing({id:'',name:'',days:30,quota_bytes:0,group_id:groups[0]?.id??'',stars:0,enabled:true})}>پلن جدید</button>}</div>
   {editing&&<form className="card settings-form" key={editing.id} onSubmit={save}>
@@ -93,6 +94,51 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
    <tbody>{orders.map(o=><tr key={o.id}><td>{o.user_name||o.user_id}<small dir="ltr">{o.telegram_id}</small></td><td>{o.plan.name}</td><td>{o.plan.stars||'رایگان'}</td><td>{orderStatus[o.status]??o.status}</td><td><bdi>{o.charge_id||'—'}</bdi></td><td>{new Date(o.created_at).toLocaleString('fa-IR')}</td></tr>)}</tbody>
   </table>{!orders.length&&<p>سفارشی ثبت نشده است.</p>}{more&&<button className="secondary" disabled={busy} onClick={older}>سفارش‌های قدیمی‌تر</button>}</section>
  </>;
+}
+
+type BotSettings = {has_token:boolean;terms:string;support:string};
+
+function TelegramSettings() {
+ const [settings,setSettings]=useState<BotSettings|null>(null);
+ const [token,setToken]=useState('');
+ const [busy,setBusy]=useState(false);
+ const [notice,setNotice]=useState('');
+ const [error,setError]=useState('');
+
+ useEffect(()=>{
+  api<BotSettings>('/bot/settings').then(setSettings).catch(e=>setError(e.message));
+ },[]);
+
+ async function save(removeToken=false) {
+  if(!settings)return;
+  setBusy(true);
+  setError('');
+  setNotice('');
+  try {
+   setSettings(await api<BotSettings>('/bot/settings','PUT',{
+    token,terms:settings.terms,support:settings.support,remove_token:removeToken,
+   }));
+   setToken('');
+   setNotice(removeToken?'توکن حذف شد و بات متوقف می‌شود.':'تنظیمات ذخیره شد.');
+  } catch(e){setError((e as Error).message)}
+  finally{setBusy(false)}
+ }
+
+ return <section>
+  <h2>تنظیمات بات</h2>
+  {error&&<p role="alert" className="form-error">{error}</p>}
+  {notice&&<p role="status">{notice}</p>}
+  {settings&&<form className="card settings-form" onSubmit={e=>{e.preventDefault();void save()}}>
+   <p>{settings.has_token?'توکن ثبت شده است. برای حفظ توکن فعلی، فیلد را خالی بگذارید.':'توکن ثبت نشده است.'}</p>
+   <label className="field">توکن BotFather<input type="password" dir="ltr" autoComplete="new-password" value={token} onChange={e=>setToken(e.target.value)}/></label>
+   <label className="field">شرایط خرید<textarea maxLength={3500} value={settings.terms} onChange={e=>setSettings({...settings,terms:e.target.value})}/></label>
+   <label className="field">راه تماس پشتیبانی<input maxLength={3500} value={settings.support} onChange={e=>setSettings({...settings,support:e.target.value})}/></label>
+   <div className="actions">
+    <button className="primary" disabled={busy}>ذخیره تنظیمات بات</button>
+    {settings.has_token&&<button type="button" className="secondary danger" disabled={busy} onClick={()=>{if(confirm('توکن حذف و بات متوقف شود؟'))void save(true)}}>حذف توکن و توقف بات</button>}
+   </div>
+  </form>}
+ </section>;
 }
 
 export function TelegramLink({userID}:{userID:string}) {
