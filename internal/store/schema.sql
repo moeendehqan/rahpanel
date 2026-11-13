@@ -50,3 +50,58 @@ ALTER TABLE bot_orders ADD COLUMN IF NOT EXISTS approved_at timestamptz;
 CREATE INDEX IF NOT EXISTS bot_orders_plan_buyer ON bot_orders(plan_id,telegram_id);
 CREATE INDEX IF NOT EXISTS bot_orders_plan_user ON bot_orders(plan_id,user_id);
 CREATE INDEX IF NOT EXISTS bot_orders_created_at ON bot_orders(created_at DESC);
+CREATE TABLE IF NOT EXISTS bulk_requests (
+    admin_id text NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+    key text NOT NULL, digest text NOT NULL, PRIMARY KEY(admin_id,key)
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS account_token_hash text;
+CREATE UNIQUE INDEX IF NOT EXISTS account_token_hash_unique ON users(account_token_hash);
+CREATE TABLE IF NOT EXISTS user_node_activity (
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    node_id text NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    sampled_at timestamptz NOT NULL,
+    PRIMARY KEY(user_id,node_id)
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_days integer NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS next_reset_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_reset_at timestamptz;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS accounting_sample_at timestamptz;
+CREATE INDEX IF NOT EXISTS users_reset_due ON users(next_reset_at) WHERE next_reset_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS webhook_config (
+    singleton boolean PRIMARY KEY CHECK(singleton), url text NOT NULL, secret bytea NOT NULL
+);
+CREATE TABLE IF NOT EXISTS webhook_state (
+    kind text NOT NULL, target text NOT NULL, status text NOT NULL, PRIMARY KEY(kind,target)
+);
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id text PRIMARY KEY, kind text NOT NULL, target text NOT NULL, status text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now(), next_attempt timestamptz NOT NULL DEFAULT now(),
+    attempts integer NOT NULL DEFAULT 0, delivery text NOT NULL DEFAULT 'pending'
+);
+CREATE INDEX IF NOT EXISTS webhook_due ON webhook_events(next_attempt) WHERE delivery='pending';
+CREATE OR REPLACE FUNCTION observe_user_webhook() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    event_kind text;
+    event_status text;
+    previous_status text;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM webhook_config) THEN RETURN NEW; END IF;
+    PERFORM pg_advisory_xact_lock_shared(503812);
+    IF NOT EXISTS (SELECT 1 FROM webhook_config) THEN RETURN NEW; END IF;
+    FOR event_kind,event_status IN
+        SELECT 'user.enabled', CASE WHEN NEW.enabled THEN 'enabled' ELSE 'suspended' END
+        UNION ALL SELECT 'user.quota', CASE WHEN NEW.quota_bytes>0 AND NEW.used_bytes>=NEW.quota_bytes THEN 'exhausted' ELSE 'available' END
+    LOOP
+        SELECT status INTO previous_status FROM webhook_state WHERE kind=event_kind AND target=NEW.id FOR UPDATE;
+        IF previous_status IS NOT NULL AND previous_status<>event_status AND event_status NOT IN ('valid','available') THEN
+            INSERT INTO webhook_events(id,kind,target,status) VALUES(gen_random_uuid()::text,event_kind,NEW.id,event_status);
+        END IF;
+        INSERT INTO webhook_state(kind,target,status) VALUES(event_kind,NEW.id,event_status)
+            ON CONFLICT(kind,target) DO UPDATE SET status=excluded.status WHERE webhook_state.status<>excluded.status;
+    END LOOP;
+    RETURN NEW;
+END;
+$$;
+CREATE OR REPLACE TRIGGER user_webhook_changes
+AFTER INSERT OR UPDATE OF enabled,expires_at,quota_bytes,used_bytes ON users
+FOR EACH ROW EXECUTE FUNCTION observe_user_webhook();

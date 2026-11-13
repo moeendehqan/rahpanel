@@ -62,12 +62,14 @@ type Usage struct {
 	Download int64  `json:"download"`
 }
 type Report struct {
-	ID             string  `json:"id"`
-	RunID          string  `json:"run_id"`
-	Sequence       int64   `json:"sequence"`
-	Usage          []Usage `json:"usage"`
-	AppliedVersion string  `json:"applied_version"`
-	Error          string  `json:"error"`
+	SampleStart    *time.Time `json:"sample_start,omitempty"`
+	SampleEnd      *time.Time `json:"sample_end,omitempty"`
+	ID             string     `json:"id"`
+	RunID          string     `json:"run_id"`
+	Sequence       int64      `json:"sequence"`
+	Usage          []Usage    `json:"usage"`
+	AppliedVersion string     `json:"applied_version"`
+	Error          string     `json:"error"`
 }
 type Snapshot struct {
 	ClientCertificate []byte    `json:"client_certificate,omitempty"`

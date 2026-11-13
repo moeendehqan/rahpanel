@@ -123,7 +123,19 @@ func Run(ctx context.Context, cfg Config) error {
 		if e != nil {
 			return e
 		}
+		previousRun := state.RunID
 		state.Sample(run, values, time.Now())
+		if !serverReceived.IsZero() && time.Since(serverReceived) <= 5*time.Minute {
+			sampledAt := snapshot.ServerTime.Add(time.Since(serverReceived)).UTC()
+			report := &state.Outbox[len(state.Outbox)-1]
+			report.SampleEnd = &sampledAt
+			if previousRun == run && state.LastSampleEnd != nil && !sampledAt.Before(*state.LastSampleEnd) {
+				report.SampleStart = state.LastSampleEnd
+			}
+			state.LastSampleEnd = &sampledAt
+		} else {
+			state.LastSampleEnd = nil
+		}
 		return Save(statePath, state)
 	}
 	quarantine := func(cause error) error {

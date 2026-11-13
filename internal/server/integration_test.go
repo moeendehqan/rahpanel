@@ -137,6 +137,43 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 		t.Fatalf("login: %d %s", response.Code, response.Body)
 	}
 	cookie := response.Result().Cookies()[0]
+	t.Run("bulk request is atomic and idempotent; account link is independently revocable", func(t *testing.T) {
+		created := request("POST", "/api/v1/users", `{"name":"feature-test","enabled":true,"expires_at":"2099-01-01T00:00:00Z","quota_bytes":10,"group_id":"default"}`, cookie)
+		var user struct {
+			ID string `json:"id"`
+		}
+		if created.Code != 201 || json.Unmarshal(created.Body.Bytes(), &user) != nil {
+			t.Fatalf("create: %d %s", created.Code, created.Body)
+		}
+		defer request("DELETE", "/api/v1/users/"+user.ID, "", cookie)
+		bulk := func(body string) int { return request("POST", "/api/v1/users/bulk", body, cookie).Code }
+		body := `{"key":"unique-feature-request","action":"quota","ids":["` + user.ID + `"],"amount":5}`
+		if bulk(body) != 200 || bulk(body) != 200 || bulk(strings.Replace(body, `"amount":5`, `"amount":6`, 1)) != 409 {
+			t.Fatal("bulk idempotency failed")
+		}
+		if bulk(`{"key":"atomic-feature-request","action":"quota","ids":["`+user.ID+`","zz-absent"],"amount":5}`) != 400 {
+			t.Fatal("invalid bulk request accepted")
+		}
+		var quota int
+		if err := s.DB.QueryRow("SELECT quota_bytes FROM users WHERE id=$1", user.ID).Scan(&quota); err != nil || quota != 15 {
+			t.Fatalf("unexpected quota %d: %v", quota, err)
+		}
+		path := "/api/v1/users/" + user.ID + "/account"
+		issued := request("POST", path, `{"action":"issue"}`, cookie)
+		var account struct {
+			Link string `json:"link"`
+		}
+		if issued.Code != 200 || json.Unmarshal(issued.Body.Bytes(), &account) != nil {
+			t.Fatalf("issue: %d %s", issued.Code, issued.Body)
+		}
+		page := request("GET", account.Link, "", nil)
+		if page.Code != 200 || page.Header().Get("Cache-Control") != "no-store" || !strings.Contains(page.Body.String(), "data:image/png;base64,") {
+			t.Fatal("active page or QR missing")
+		}
+		if request("POST", path, `{"action":"revoke"}`, cookie).Code != 200 || request("GET", account.Link, "", nil).Code != 404 {
+			t.Fatal("revoked page still accessible")
+		}
+	})
 	setup := request("GET", "/api/v1/settings", "", cookie)
 	var initial struct {
 		Settings   provision.Settings `json:"settings"`

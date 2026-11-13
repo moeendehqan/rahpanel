@@ -1,3 +1,5 @@
+import {WebhookSettings} from './webhook-settings';
+import {AccountLink,BulkControls,UserActivity,ResetPolicy,BulkCreate} from './user-operations';
 import {TelegramLink,TelegramShop} from './telegram-shop';
 import {InstallJobs} from './install-jobs';
 import React,{useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
@@ -88,6 +90,7 @@ function App(){
  const [users,setUsers]=useState<User[]>([]),[nodes,setNodes]=useState<VPNNode[]>([]),[groups,setGroups]=useState<Group[]>([]),[jobs,setJobs]=useState<Job[]>([]),[audit,setAudit]=useState<Audit[]>([]);
  const [settings,setSettings]=useState<Settings>(initialSettings),[hasToken,setHasToken]=useState(false),[configured,setConfigured]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loaded,setLoaded]=useState(false);
  const [userFilter,setUserFilter]=useState<UserFilter>('all');
+ const [selectedUsers,setSelectedUsers]=useState<string[]>([]);
  const [userSort,setUserSort]=useState<{key:UserSort;descending:boolean}|null>(null);
  const [modal,setModal]=useState<'user'|'node'|'group'|null>(null),[editing,setEditing]=useState<User|null>(null),[subscription,setSubscription]=useState<User|null>(null),[installing,setInstalling]=useState<VPNNode|null>(null),[search,setSearch]=useState('');
  const [renaming,setRenaming]=useState<VPNNode|null>(null);
@@ -179,6 +182,8 @@ function App(){
        {label} <span>{fa(searchedUserRows.filter(row=>row[key]).length)}</span>
      </button>)}
    </div>
+   {canEdit&&<BulkCreate groups={groups} done={load}/>}
+   {canEdit&&<BulkControls ids={selectedUsers} done={async()=>{setSelectedUsers([]);await load()}}/>}
    {visibleUserRows.length>0&&<>
      <div className="users-mobile-sort" role="group" aria-label="مرتب‌سازی کاربران">
        <button className="secondary" onClick={()=>toggleUserSort('usage')}>مصرف سهمیه {userSort?.key==='usage'&&(userSort.descending?'↓':'↑')}</button>
@@ -198,7 +203,7 @@ function App(){
            <button className="text-btn danger" onClick={()=>{if(confirm('کاربر و اعتبارنامه‌های او حذف شوند؟'))perform(()=>api('/users/'+u.id,'DELETE'),'کاربر حذف شد')}}>حذف</button>
          </>;
          return <tr role="row" key={u.id}>
-           <th role="rowheader" scope="row" className="user-name"><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small></th>
+           <th role="rowheader" scope="row" className="user-name"><strong>{u.name}</strong><small>{groups.find(g=>g.id===u.group_id)?.name}</small>{canEdit&&<input type="checkbox" aria-label={'انتخاب '+u.name} checked={selectedUsers.includes(u.id)} onChange={e=>setSelectedUsers(current=>e.target.checked?[...current,u.id]:current.filter(id=>id!==u.id))}/>}</th>
            <td role="cell" className="user-status"><span className={'badge '+(status==='فعال'?'good':u.enabled?'user-warning':'neutral')}>{status}</span></td>
            <td role="cell" className="user-metric">
              <span className="user-mobile-label">مصرف / سهمیه</span>
@@ -235,6 +240,7 @@ function App(){
      :<Empty title="کاربری پیدا نشد" text="فیلتر یا عبارت جست‌وجو را تغییر دهید."/>)}
  </section>}
  {tab==='jobs'&&(jobs.length ? <InstallJobs jobs={jobs} nodes={nodes}/> : <section className="card"><h2>آخرین عملیات</h2><Empty title="عملیاتی ثبت نشده" text="با نصب اولین نود، مراحل اجرا اینجا نمایش داده می‌شود."/></section>)}
+ {tab==='settings'&&<WebhookSettings canEdit={canEdit}/>}
  {tab==='settings'&&canEdit&&<PasswordForm username={account.username}/>}
  {tab==='settings'&&<form className="card settings-form" onSubmit={e=>{
   e.preventDefault();
@@ -270,7 +276,7 @@ function App(){
   setNotice(result.host_changed?'آدرس IP ذخیره شد. سرور را با آدرس جدید راه‌اندازی کنید.':'اطلاعات سرور ذخیره شد');
  }}/>}
  {installing&&<InstallForm node={installing} close={()=>setInstalling(null)} save={async credentials=>{await api('/nodes/'+installing.id+'/install','POST',credentials);setInstalling(null);setTab('jobs');await load()}}/>}
- {subscription&&<Subscription canEdit={canEdit} user={subscription} base={settings.public_url||location.origin} close={()=>setSubscription(null)} rotate={()=>perform(async()=>{await api('/users/'+subscription.id+'/rotate','POST');setSubscription(null)},'لینک قبلی باطل شد؛ اشتراک جدید را باز کنید')}/>}
+ {subscription&&<Subscription canEdit={canEdit} user={subscription} base={settings.public_url||location.origin} close={()=>setSubscription(null)} onRevoked={()=>{setSubscription(null);perform(load,'هر دو لینک قبلی باطل شدند')}} rotate={()=>perform(async()=>{await api('/users/'+subscription.id+'/rotate','POST');setSubscription(null)},'لینک قبلی باطل شد؛ اشتراک جدید را باز کنید')}/>}
  </div>
 }
 function Empty({title,text}:{title:string;text:string}){return <div className="empty"><Network size={30}/><h3>{title}</h3><p>{text}</p></div>}
@@ -403,5 +409,5 @@ function InstallForm({node,close,save}:{node:VPNNode;close:()=>void;save:(v:unkn
  {error&&<p role="alert" className="form-error">{error}</p>}<button className="primary" disabled={busy}>{busy?'در حال بررسی…':fp?'تأیید و نصب خودکار':'دریافت اثر انگشت SSH'}</button></form></Modal>
 }
 function subscriptionLink(base:string,user:User){return base.replace(/\/$/,'')+'/sub/'+user.token}
-function Subscription({user,base,close,rotate,canEdit}:{canEdit:boolean;user:User;base:string;close:()=>void;rotate:()=>void}){const link=subscriptionLink(base,user);const [copied,setCopied]=useState(false),[error,setError]=useState('');return <Modal title={'اشتراک '+user.name} close={close}><div className="qr"><QRCodeSVG value={link} size={190} marginSize={3}/></div><p>این لینک را در بخش اشتراک کلاینت وارد و به‌روزرسانی کنید. برای پوشش دستگاه، حالت VPN یا TUN را فعال کنید.</p><div className="copy-row"><input readOnly dir="ltr" aria-label="لینک اشتراک" value={link}/><button className="secondary" aria-label="کپی لینک" onClick={()=>navigator.clipboard.writeText(link).then(()=>setCopied(true)).catch(()=>setError('کپی خودکار ممکن نشد؛ لینک را دستی کپی کنید.'))}>{copied?<Check size={18}/>:<Copy size={18}/>}</button></div>{error&&<p role="alert">{error}</p>}<p className="muted">لینک اشتراک محرمانه است. ابطال لینک، کانفیگ‌های قبلاً دریافت‌شده را باطل نمی‌کند.</p><button className="secondary danger" onClick={()=>{if(confirm('لینک فعلی باطل و لینک جدید صادر شود؟'))rotate()}}>ابطال و صدور لینک جدید</button>{canEdit&&<TelegramLink userID={user.id}/>}</Modal>}
+function Subscription({user,base,close,rotate,canEdit,onRevoked}:{onRevoked:()=>void;canEdit:boolean;user:User;base:string;close:()=>void;rotate:()=>void}){const link=subscriptionLink(base,user);const [copied,setCopied]=useState(false),[error,setError]=useState('');return <Modal title={'اشتراک '+user.name} close={close}><div className="qr"><QRCodeSVG value={link} size={190} marginSize={3}/></div><p>این لینک را در بخش اشتراک کلاینت وارد و به‌روزرسانی کنید. برای پوشش دستگاه، حالت VPN یا TUN را فعال کنید.</p><div className="copy-row"><input readOnly dir="ltr" aria-label="لینک اشتراک" value={link}/><button className="secondary" aria-label="کپی لینک" onClick={()=>navigator.clipboard.writeText(link).then(()=>setCopied(true)).catch(()=>setError('کپی خودکار ممکن نشد؛ لینک را دستی کپی کنید.'))}>{copied?<Check size={18}/>:<Copy size={18}/>}</button></div><label>Mihomo <input readOnly dir="ltr" value={link+"/clash"} onFocus={e=>e.currentTarget.select()}/></label>{error&&<p role="alert">{error}</p>}<p className="muted">لینک اشتراک محرمانه است. ابطال لینک، کانفیگ‌های قبلاً دریافت‌شده را باطل نمی‌کند.</p><button className="secondary danger" onClick={()=>{if(confirm('لینک فعلی باطل و لینک جدید صادر شود؟'))rotate()}}>ابطال و صدور لینک جدید</button><UserActivity key={user.id} userID={user.id}/>{canEdit&&<><AccountLink key={user.id} userID={user.id} onRevoked={onRevoked}/><ResetPolicy key={"reset-"+user.id} userID={user.id}/><TelegramLink userID={user.id}/></>}</Modal>}
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

@@ -286,16 +286,36 @@ func (s *Store) ApplyReport(ctx context.Context, nodeID string, r core.Report) e
 	}
 	inserted, _ := result.RowsAffected()
 	if inserted > 0 {
+		var sampleEnd *time.Time
+		if r.SampleEnd != nil && !r.SampleEnd.IsZero() && !r.SampleEnd.After(time.Now().Add(30*time.Second)) {
+			sampleEnd = r.SampleEnd
+		}
+
 		sort.Slice(r.Usage, func(i, j int) bool { return r.Usage[i].UserID < r.Usage[j].UserID })
 		for _, u := range r.Usage {
 			if u.Upload < 0 || u.Download < 0 || u.Upload > 1<<60 || u.Download > 1<<60 {
 				return errors.New("invalid usage")
 			}
-			res, e := tx.ExecContext(ctx, `UPDATE users SET used_bytes=used_bytes+$1 WHERE id=$2 AND EXISTS(SELECT 1 FROM credentials WHERE user_id=$2 AND node_id=$3)`, u.Upload+u.Download, u.UserID, nodeID)
+			if sampleEnd != nil {
+				if e = applyDueReset(ctx, tx, u.UserID); e != nil {
+					return e
+				}
+			}
+			res, e := tx.ExecContext(ctx, `UPDATE users SET used_bytes=used_bytes+
+                CASE WHEN $4::timestamptz < last_reset_at THEN 0 ELSE $1 END
+                WHERE id=$2 AND EXISTS(SELECT 1 FROM credentials WHERE user_id=$2 AND node_id=$3)`, u.Upload+u.Download, u.UserID, nodeID, sampleEnd)
 			if e != nil {
 				return e
 			}
 			n, _ := res.RowsAffected()
+			if n > 0 && u.Upload+u.Download > 0 && sampleEnd != nil {
+				_, e = tx.ExecContext(ctx, `INSERT INTO user_node_activity(user_id,node_id,sampled_at) VALUES($1,$2,$3)
+                    ON CONFLICT(user_id,node_id) DO UPDATE SET sampled_at=excluded.sampled_at
+                    WHERE user_node_activity.sampled_at < excluded.sampled_at`, u.UserID, nodeID, *r.SampleEnd)
+				if e != nil {
+					return e
+				}
+			}
 			if n == 0 {
 				var exists bool
 				if e = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE id=$1)", u.UserID).Scan(&exists); e != nil {
@@ -305,6 +325,9 @@ func (s *Store) ApplyReport(ctx context.Context, nodeID string, r core.Report) e
 					return errors.New("credential not assigned to node")
 				}
 			}
+		}
+		if _, e = tx.ExecContext(ctx, "UPDATE nodes SET accounting_sample_at=CASE WHEN $2::timestamptz IS NULL THEN NULL ELSE greatest(accounting_sample_at,$2) END WHERE id=$1", nodeID, sampleEnd); e != nil {
+			return e
 		}
 	}
 	// Agent cannot overwrite readiness or external verification results.

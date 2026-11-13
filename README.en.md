@@ -122,3 +122,13 @@ RUN_CAPACITY_TEST=1 TEST_DATABASE_URL='postgres://rah:test@localhost:5432/rah_te
 The panel reads `DATABASE_URL`, `MASTER_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `PUBLIC_URL`, and `AGENT_URL` from the environment. Set `INSECURE_DEV=true` for local HTTP development. Compose loads `.env`. When running Go directly, supply the variables through the environment. With Vite, set `PUBLIC_URL` to its origin so origin validation passes.
 
 Pending acceptance checks include installation on two Ubuntu servers, live Cloudflare and ACME integration, reference clients, practical recovery, and testing from Iranian networks. The project makes no guarantees of undetectability or connectivity during a complete loss of external routes. See the [acceptance checklist](docs/acceptance.md).
+
+### Subscription and accounting controls
+
+Select users in the Users table for bulk renewal, quota increases, suspension, activation, usage reset, or deletion. Bulk creation uses a common group, expiry period, and quota. A rejected member rejects the whole batch.
+
+The subscription dialog can issue or revoke a private account page separately from the client subscription. Treat either link as a credential. The optional Mihomo URL is the existing subscription URL followed by /clash.
+
+Automatic quota reset is off by default. In the subscription dialog, set a period in days and inspect the next reset and group readiness. Upgrade the panel first, then the agents. Each enabled node must send fresh, timestamped reports before automatic reset can run. A traffic sample is attributed to the period containing its end time. Manual resets preserve the scheduled date.
+
+The optional webhook accepts one public HTTPS destination on port 443. The receiver should deduplicate by the JSON event id. Verify X-Rah-Signature as the hex HMAC-SHA256 of X-Rah-Timestamp, a literal dot, and the exact request body, using the configured secret. Settings changes cancel pending deliveries. The settings page shows the latest delivery attempts.

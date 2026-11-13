@@ -97,7 +97,16 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("PUT /api/v1/settings", s.authorize(s.saveSettings))
 	m.HandleFunc("POST /api/v1/settings/cloudflare/test", s.authorize(s.testCloudflare))
 	m.HandleFunc("GET /api/v1/audit", s.authorize(s.audit))
+	m.HandleFunc("GET /api/v1/settings/webhook", s.authorize(s.webhookSettings))
+	m.HandleFunc("PUT /api/v1/settings/webhook", s.authorize(s.webhookSettings))
 	m.HandleFunc("GET /sub/{token}", s.subscription)
+	m.HandleFunc("GET /sub/{token}/clash", s.subscription)
+	m.HandleFunc("GET /account/{token}", s.account)
+	m.HandleFunc("POST /api/v1/users/{id}/account", s.authorize(s.accountLink))
+	m.HandleFunc("POST /api/v1/users/bulk", s.authorize(s.bulkUsers))
+	m.HandleFunc("GET /api/v1/users/{id}/activity", s.authorize(s.userActivity))
+	m.HandleFunc("GET /api/v1/users/{id}/reset-policy", s.authorize(s.resetPolicy))
+	m.HandleFunc("PUT /api/v1/users/{id}/reset-policy", s.authorize(s.resetPolicy))
 	m.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/agent/") {
 			http.NotFound(w, r)
@@ -193,7 +202,7 @@ func (s *Server) rotate(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) resetUsage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, e := s.Store.DB.ExecContext(r.Context(), "UPDATE users SET used_bytes=0 WHERE id=$1", id); e != nil {
+	if _, e := s.Store.DB.ExecContext(r.Context(), "UPDATE users SET used_bytes=0,last_reset_at=now() WHERE id=$1", id); e != nil {
 		problem(w, 500, "Cannot reset usage")
 		return
 	}
@@ -605,6 +614,11 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Subscription-Userinfo", usageHeader(*user))
 	w.Header().Set("Profile-Update-Interval", "1")
+	if r.Pattern == "GET /sub/{token}/clash" {
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		io.WriteString(w, core.MihomoSubscription(allowed, creds))
+		return
+	}
 	io.WriteString(w, core.Subscription(allowed, creds))
 }
 func usageHeader(u core.User) string {

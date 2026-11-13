@@ -21,6 +21,7 @@ type Config struct {
 	Directory string `json:"directory"`
 }
 type State struct {
+	LastSampleEnd     *time.Time       `json:"last_sample_end,omitempty"`
 	AccountingBlocked bool             `json:"accounting_blocked"`
 	RunID             string           `json:"run_id"`
 	Sequence          int64            `json:"sequence"`
