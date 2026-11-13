@@ -13,16 +13,19 @@ import (
 	"github.com/rahpanel/rahpanel/internal/core"
 )
 
+var ErrBotPurchaseLimit = errors.New("telegram plan purchase limit reached")
+
 var ErrBotUnavailable = errors.New("telegram subscription operation unavailable")
 
 type BotPlan struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Days       int    `json:"days"`
-	QuotaBytes int64  `json:"quota_bytes"`
-	GroupID    string `json:"group_id"`
-	Stars      int    `json:"stars"`
-	Enabled    bool   `json:"enabled"`
+	PurchaseLimit int    `json:"purchase_limit"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Days          int    `json:"days"`
+	QuotaBytes    int64  `json:"quota_bytes"`
+	GroupID       string `json:"group_id"`
+	Stars         int    `json:"stars"`
+	Enabled       bool   `json:"enabled"`
 }
 
 type BotOrder struct {
@@ -37,7 +40,7 @@ type BotOrder struct {
 }
 
 func (s *Store) BotPlans(ctx context.Context) ([]BotPlan, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT id,name,days,quota_bytes,group_id,stars,enabled FROM bot_plans ORDER BY name,id")
+	rows, err := s.DB.QueryContext(ctx, "SELECT id,name,days,quota_bytes,group_id,stars,enabled,purchase_limit FROM bot_plans ORDER BY name,id")
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +48,7 @@ func (s *Store) BotPlans(ctx context.Context) ([]BotPlan, error) {
 	plans := []BotPlan{}
 	for rows.Next() {
 		var p BotPlan
-		if err := rows.Scan(&p.ID, &p.Name, &p.Days, &p.QuotaBytes, &p.GroupID, &p.Stars, &p.Enabled); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Days, &p.QuotaBytes, &p.GroupID, &p.Stars, &p.Enabled, &p.PurchaseLimit); err != nil {
 			return nil, err
 		}
 		plans = append(plans, p)
@@ -55,15 +58,15 @@ func (s *Store) BotPlans(ctx context.Context) ([]BotPlan, error) {
 
 func (s *Store) SaveBotPlan(ctx context.Context, p BotPlan) error {
 	p.Name = strings.TrimSpace(p.Name)
-	if p.Name == "" || len(p.Name) > 100 || p.Days < 1 || p.Days > 3650 || p.Stars < 0 || p.Stars > math.MaxInt32 || p.QuotaBytes < 0 {
+	if p.Name == "" || len(p.Name) > 100 || p.Days < 1 || p.Days > 3650 || p.Stars < 0 || p.Stars > math.MaxInt32 || p.QuotaBytes < 0 || p.PurchaseLimit < 0 || p.PurchaseLimit > 2 {
 		return ErrBotUnavailable
 	}
 	if p.ID == "" {
-		_, err := s.DB.ExecContext(ctx, "INSERT INTO bot_plans VALUES($1,$2,$3,$4,$5,$6,$7)", core.ID(), p.Name, p.Days, p.QuotaBytes, p.GroupID, p.Stars, p.Enabled)
+		_, err := s.DB.ExecContext(ctx, "INSERT INTO bot_plans(id,name,days,quota_bytes,group_id,stars,enabled,purchase_limit) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", core.ID(), p.Name, p.Days, p.QuotaBytes, p.GroupID, p.Stars, p.Enabled, p.PurchaseLimit)
 		return err
 	}
 	var id string
-	return s.DB.QueryRowContext(ctx, "UPDATE bot_plans SET name=$2,days=$3,quota_bytes=$4,group_id=$5,stars=$6,enabled=$7 WHERE id=$1 RETURNING id", p.ID, p.Name, p.Days, p.QuotaBytes, p.GroupID, p.Stars, p.Enabled).Scan(&id)
+	return s.DB.QueryRowContext(ctx, "UPDATE bot_plans SET name=$2,days=$3,quota_bytes=$4,group_id=$5,stars=$6,enabled=$7,purchase_limit=$8 WHERE id=$1 RETURNING id", p.ID, p.Name, p.Days, p.QuotaBytes, p.GroupID, p.Stars, p.Enabled, p.PurchaseLimit).Scan(&id)
 }
 
 func (s *Store) BotOrders(ctx context.Context, before time.Time) ([]BotOrder, error) {
@@ -215,13 +218,13 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 	defer tx.Rollback()
 	var o BotOrder
 	var available bool
-	var checkoutID string
+	var checkoutID, planID string
 	p := &o.Plan
 	err = tx.QueryRowContext(ctx, `SELECT coalesce(o.user_id,''),o.group_id,o.days,o.quota_bytes,o.stars,o.status,coalesce(o.charge_id,''),
  p.enabled AND p.group_id=o.group_id AND p.days=o.days AND p.quota_bytes=o.quota_bytes AND p.stars=o.stars,
- o.created_at,coalesce(o.checkout_id,'') FROM bot_orders o JOIN bot_plans p ON p.id=o.plan_id
+ o.created_at,coalesce(o.checkout_id,''),o.plan_id,p.purchase_limit FROM bot_orders o JOIN bot_plans p ON p.id=o.plan_id
  WHERE o.id=$1 AND o.telegram_id=$2 FOR UPDATE OF o`, id, telegramID).
-		Scan(&o.UserID, &p.GroupID, &p.Days, &p.QuotaBytes, &p.Stars, &o.Status, &o.ChargeID, &available, &o.CreatedAt, &checkoutID)
+		Scan(&o.UserID, &p.GroupID, &p.Days, &p.QuotaBytes, &p.Stars, &o.Status, &o.ChargeID, &available, &o.CreatedAt, &checkoutID, &planID, &p.PurchaseLimit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrBotUnavailable
 	}
@@ -269,7 +272,24 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 	}
 	now := time.Now()
 	status := "fulfilled"
-	if !botEligible(u, o, now) {
+	limited := false
+	if p.PurchaseLimit != 0 {
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM bot_orders
+			WHERE plan_id=$1 AND id<>$2 AND (telegram_id=$3 OR user_id=nullif($4,''))
+			AND (
+				(status='fulfilled' AND ($5=1 OR coalesce(fulfilled_at,created_at)>now()-interval '720 hours'))
+				OR ($6 AND status='approved' AND coalesce(approved_at,created_at)>now()-interval '30 minutes')
+			)
+		)`, planID, id, telegramID, u.ID, p.PurchaseLimit, stage != "receipt").Scan(&limited)
+		if err != nil {
+			return "", err
+		}
+	}
+	if limited && stage != "receipt" {
+		return "", ErrBotPurchaseLimit
+	}
+	if limited || !botEligible(u, o, now) {
 		if stage != "receipt" {
 			return "", ErrBotUnavailable
 		}
@@ -316,7 +336,7 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 			o.UserID = u.ID
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE bot_orders SET status=$2,user_id=nullif($3,''),charge_id=nullif($4,''),checkout_id=nullif($5,'') WHERE id=$1`, id, status, o.UserID, charge, checkoutID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE bot_orders SET status=$2,user_id=nullif($3,''),charge_id=nullif($4,''),checkout_id=nullif($5,''), fulfilled_at=CASE WHEN $2='fulfilled' THEN now() ELSE fulfilled_at END, approved_at=CASE WHEN $2='approved' THEN coalesce(approved_at,now()) ELSE approved_at END WHERE id=$1`, id, status, o.UserID, charge, checkoutID); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "bot_orders_charge_id_key" {
 			return "", ErrBotUnavailable

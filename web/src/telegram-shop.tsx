@@ -10,6 +10,7 @@ type Plan = {
  quota_bytes:number;
  group_id:string;
  stars:number;
+ purchase_limit:number;
  enabled:boolean;
 };
 type Order = {
@@ -56,6 +57,7 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
    await api(editing.id?'/bot/plans/'+editing.id:'/bot/plans',editing.id?'PUT':'POST',{
     name:form.get('name'),days:Number(form.get('days')),quota_bytes:quota,
     group_id:form.get('group'),stars:Number(form.get('stars')),enabled:form.has('enabled'),
+    purchase_limit:Number(form.get('purchase_limit')),
    });
    setEditing(null);
    await load();
@@ -76,7 +78,7 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
  return <>
   {canEdit&&<TelegramSettings/>}
   {error&&<p role="alert" className="form-error">{error}</p>}
-  <div className="section-heading"><h2>پلن‌های بات</h2>{canEdit&&<button className="primary" onClick={()=>setEditing({id:'',name:'',days:30,quota_bytes:0,group_id:groups[0]?.id??'',stars:0,enabled:true})}>پلن جدید</button>}</div>
+  <div className="section-heading"><h2>پلن‌های بات</h2>{canEdit&&<button className="primary" onClick={()=>setEditing({id:'',name:'',days:30,quota_bytes:0,group_id:groups[0]?.id??'',stars:0,purchase_limit:0,enabled:true})}>پلن جدید</button>}</div>
   {editing&&<form className="card settings-form" key={editing.id} onSubmit={save}>
    <label className="field">نام<input name="name" required maxLength={100} defaultValue={editing.name}/></label>
    <label className="field">مدت (روز)<input type="number" name="days" min={1} max={3650} required defaultValue={editing.days}/></label>
@@ -84,6 +86,11 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
    <label className="field">گروه VPN<select name="group" required defaultValue={editing.group_id}>{groups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
    <label className="field">قیمت (Stars، صفر یعنی رایگان)<input type="number" name="stars" min={0} max={2147483647} required defaultValue={editing.stars}/></label>
    <label><input type="checkbox" name="enabled" defaultChecked={editing.enabled}/> فعال</label>
+   <label className="field">محدودیت خرید برای هر کاربر<select name="purchase_limit" defaultValue={editing.purchase_limit??0}>
+    <option value={0}>بدون محدودیت</option>
+    <option value={1}>فقط یک‌بار</option>
+    <option value={2}>یک‌بار در هر ۳۰ روز</option>
+   </select></label>
    <div className="actions"><button className="primary" disabled={busy}>ذخیره پلن</button><button className="secondary" type="button" onClick={()=>setEditing(null)}>انصراف</button></div>
   </form>}
   <section className="card table-wrap"><table><thead><tr><th>پلن</th><th>مدت</th><th>حجم</th><th>گروه</th><th>Stars</th><th>وضعیت</th>{canEdit&&<th>عملیات</th>}</tr></thead>

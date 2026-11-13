@@ -44,4 +44,9 @@ CREATE TABLE IF NOT EXISTS bot_orders (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE bot_orders ADD COLUMN IF NOT EXISTS checkout_id text;
+ALTER TABLE bot_plans ADD COLUMN IF NOT EXISTS purchase_limit integer NOT NULL DEFAULT 0 CHECK(purchase_limit BETWEEN 0 AND 2);
+ALTER TABLE bot_orders ADD COLUMN IF NOT EXISTS fulfilled_at timestamptz;
+ALTER TABLE bot_orders ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+CREATE INDEX IF NOT EXISTS bot_orders_plan_buyer ON bot_orders(plan_id,telegram_id);
+CREATE INDEX IF NOT EXISTS bot_orders_plan_user ON bot_orders(plan_id,user_id);
 CREATE INDEX IF NOT EXISTS bot_orders_created_at ON bot_orders(created_at DESC);

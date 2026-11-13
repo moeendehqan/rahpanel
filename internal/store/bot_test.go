@@ -175,4 +175,20 @@ func TestBotOrderLifecycle(t *testing.T) {
 	if created.ID == "" || created.Token == "" || created.QuotaBytes != plan.QuotaBytes || !created.Active(time.Now()) {
 		t.Fatal("free purchase did not create an active subscription")
 	}
+	plan.Stars = 10
+	for _, limit := range []int{1, 2} {
+		plan.PurchaseLimit = limit
+		must(s.SaveBotPlan(ctx, plan))
+		next, err := s.PrepareBotOrder(ctx, newBuyer, plan.ID)
+		must(err)
+		if _, err = s.ProcessBotOrder(ctx, next.ID, newBuyer, "invoice", "", 0, ""); !errors.Is(err, ErrBotPurchaseLimit) {
+			t.Fatalf("limit %d: %v", limit, err)
+		}
+	}
+	_, err = s.DB.ExecContext(ctx, "UPDATE bot_orders SET fulfilled_at=now()-interval '31 days' WHERE id=$1", purchase.ID)
+	must(err)
+	next, err := s.PrepareBotOrder(ctx, newBuyer, plan.ID)
+	must(err)
+	_, err = s.ProcessBotOrder(ctx, next.ID, newBuyer, "invoice", "", 0, "")
+	must(err)
 }

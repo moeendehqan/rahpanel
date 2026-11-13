@@ -231,7 +231,9 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		_, err := b.Store.ProcessBotOrder(check, q.Order, q.From.ID, "checkout", q.Currency, q.Total, q.ID)
 		stop()
 		reply := params{"pre_checkout_query_id": q.ID, "ok": err == nil}
-		if err != nil {
+		if errors.Is(err, store.ErrBotPurchaseLimit) {
+			reply["error_message"] = "سقف خرید این پلن برای حساب شما تکمیل شده است."
+		} else if err != nil {
 			reply["error_message"] = "سفارش معتبر نیست یا مهلت آن تمام شده است. سفارش تازه‌ای بسازید."
 		}
 		// An expired checkout query must not block subsequent updates.
@@ -271,6 +273,10 @@ func (b Bot) handle(ctx context.Context, u update) error {
 			b.send(ctx, id, text, []button{{label, action + order.ID}})
 		case "free", "invoice":
 			result, err := b.Store.ProcessBotOrder(ctx, arg, id, action, "", 0, "")
+			if errors.Is(err, store.ErrBotPurchaseLimit) {
+				b.send(ctx, id, "سقف خرید این پلن برای حساب شما تکمیل شده است.")
+				return nil
+			}
 			if err != nil {
 				b.send(ctx, id, "درخواست انجام نشد. وضعیت اشتراک را بررسی کنید و دوباره تلاش کنید.")
 				return nil
