@@ -31,6 +31,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required initially}
       PUBLIC_URL: ${PUBLIC_URL:?required}
       AGENT_URL: ${AGENT_URL:?required}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_TERMS: ${TELEGRAM_BOT_TERMS:-}
+      TELEGRAM_BOT_SUPPORT: ${TELEGRAM_BOT_SUPPORT:-}
+      TELEGRAM_BOT_TEST: ${TELEGRAM_BOT_TEST:-false}
     ports:
       - "9443:9443"
     depends_on:

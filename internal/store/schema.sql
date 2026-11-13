@@ -24,3 +24,24 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS trojan_port integer NOT NULL DEFAULT 
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS stats_port integer NOT NULL DEFAULT 10085 CHECK(stats_port BETWEEN 1 AND 65535);
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS reality_behind_nginx boolean NOT NULL DEFAULT false;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS route_quality jsonb NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS bot_plans (
+    id text PRIMARY KEY, name text NOT NULL, days integer NOT NULL CHECK(days BETWEEN 1 AND 3650),
+    quota_bytes bigint NOT NULL CHECK(quota_bytes>=0), group_id text NOT NULL REFERENCES groups(id),
+    stars integer NOT NULL CHECK(stars>=0), enabled boolean NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bot_links (
+    telegram_id bigint PRIMARY KEY, user_id text NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS bot_codes (
+    user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    hash text NOT NULL UNIQUE, expires_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS bot_orders (
+    id text PRIMARY KEY, telegram_id bigint NOT NULL, user_id text,
+    plan_id text NOT NULL REFERENCES bot_plans(id), plan_name text NOT NULL,
+    group_id text NOT NULL REFERENCES groups(id), days integer NOT NULL, quota_bytes bigint NOT NULL,
+    stars integer NOT NULL, status text NOT NULL, charge_id text UNIQUE,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE bot_orders ADD COLUMN IF NOT EXISTS checkout_id text;
+CREATE INDEX IF NOT EXISTS bot_orders_created_at ON bot_orders(created_at DESC);

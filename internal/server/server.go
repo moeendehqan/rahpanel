@@ -77,6 +77,13 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/users/{id}/rotate", s.authorize(s.rotate))
 	m.HandleFunc("POST /api/v1/users/{id}/reset-usage", s.authorize(s.resetUsage))
 	m.HandleFunc("GET /api/v1/groups", s.authorize(s.groups))
+	m.HandleFunc("GET /api/v1/bot/plans", s.authorize(s.botPlans))
+	m.HandleFunc("POST /api/v1/bot/plans", s.authorize(s.saveBotPlan))
+	m.HandleFunc("PUT /api/v1/bot/plans/{id}", s.authorize(s.saveBotPlan))
+	m.HandleFunc("GET /api/v1/bot/orders", s.authorize(s.botOrders))
+	for _, method := range []string{"GET", "POST", "DELETE"} {
+		m.HandleFunc(method+" /api/v1/users/{id}/telegram", s.authorize(s.botLink))
+	}
 	m.HandleFunc("POST /api/v1/groups", s.authorize(s.addGroup))
 	m.HandleFunc("GET /api/v1/nodes", s.authorize(s.nodes))
 	m.HandleFunc("POST /api/v1/nodes", s.authorize(s.addNode))

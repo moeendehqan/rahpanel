@@ -11,6 +11,7 @@ import (
 	"github.com/rahpanel/rahpanel/internal/security"
 	"github.com/rahpanel/rahpanel/internal/server"
 	"github.com/rahpanel/rahpanel/internal/store"
+	"github.com/rahpanel/rahpanel/internal/telegram"
 	"log"
 	"net/http"
 	"net/url"
@@ -91,6 +92,15 @@ func main() {
 	go w.Run(ctx)
 	go w.MonitorRoutes(ctx, public)
 	go maintain(ctx, s, w, refresh)
+	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+		terms, support := os.Getenv("TELEGRAM_BOT_TERMS"), os.Getenv("TELEGRAM_BOT_SUPPORT")
+		if terms == "" || support == "" || len([]rune(terms)) > 3500 || len([]rune(support)) > 3500 {
+			log.Print("Telegram bot disabled: configure purchase terms and payment support (up to 3500 characters each)")
+		} else {
+			bot := telegram.Bot{Store: s, Token: token, PublicURL: public, Terms: terms, Support: support, Test: os.Getenv("TELEGRAM_BOT_TEST") == "true"}
+			go bot.Run(ctx)
+		}
+	}
 	admin := &http.Server{Addr: env("HTTP_ADDR", "127.0.0.1:8080"), Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	nodes := &http.Server{Addr: env("AGENT_ADDR", ":9443"), Handler: api.AgentHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return endpointIdentity.Load(), nil }, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}}
 	go func() {
