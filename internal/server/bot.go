@@ -10,6 +10,33 @@ import (
 	"github.com/rahpanel/rahpanel/internal/telegram"
 )
 
+func (s *Server) referralSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "PUT" {
+		var cfg store.ReferralSettings
+		if !decode(w, r, &cfg) {
+			return
+		}
+		if cfg.Threshold < 1 || cfg.Threshold > 1000000 || cfg.Days < 0 || cfg.Days > 3650 || cfg.GiB < 0 || cfg.GiB > 1000000 ||
+			(cfg.Enabled && cfg.Days == 0 && cfg.GiB == 0) {
+			problem(w, 400, "تعداد دعوت و مقدار پاداش را بررسی کنید.")
+			return
+		}
+		if err := s.Store.SetSetting(r.Context(), store.ReferralSettingsKey, cfg); err != nil {
+			problem(w, 500, "Cannot save referral settings")
+			return
+		}
+		s.auditAction(r, "bot.referrals.save", store.ReferralSettingsKey)
+		write(w, 200, cfg)
+		return
+	}
+	cfg, err := s.Store.ReferralSettings(r.Context())
+	if err != nil {
+		problem(w, 500, "Cannot load referral settings")
+		return
+	}
+	write(w, 200, cfg)
+}
+
 func (s *Server) botSettings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	current, err := telegram.LoadSettings(r.Context(), s.Store, telegram.Settings{

@@ -256,6 +256,8 @@ func (b Bot) handle(ctx context.Context, u update) error {
 			b.list(ctx, id)
 		case "mine":
 			b.showUser(ctx, id)
+		case "referrals":
+			b.showReferrals(ctx, id)
 		case "plan":
 			order, err := b.Store.PrepareBotOrder(ctx, id, arg)
 			if err != nil {
@@ -317,7 +319,20 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		return nil
 	}
 	cmd, _, _ := strings.Cut(parts[0], "@")
+	if cmd == "/start" {
+		var code string
+		if len(parts) == 2 {
+			if arg, ok := strings.CutPrefix(parts[1], "ref_"); ok {
+				code = arg
+			}
+		}
+		if err := b.Store.RecordBotStart(ctx, id, code); err != nil {
+			return errors.New("could not record Telegram start")
+		}
+	}
 	switch cmd {
+	case "/invite":
+		b.showReferrals(ctx, id)
 	case "/paysupport", "/support":
 		b.send(ctx, id, "پشتیبانی خرید\n"+b.Support)
 	case "/terms":
@@ -334,7 +349,33 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		}
 		fallthrough
 	default:
-		b.send(ctx, id, "برای اتصال اشتراک فعلی، کد مدیر را با دستور ‎/link‎ بفرستید.", []button{{"خرید یا تمدید", "list"}, {"اشتراک من", "mine"}})
+		b.send(ctx, id, "برای اتصال اشتراک فعلی، کد مدیر را با دستور ‎/link‎ بفرستید.", []button{{"خرید یا تمدید", "list"}, {"اشتراک من", "mine"}}, []button{{"دعوت دوستان", "referrals"}})
 	}
 	return nil
+}
+
+func (b Bot) showReferrals(ctx context.Context, id int64) {
+	cfg, err := b.Store.ReferralSettings(ctx)
+	if err != nil {
+		b.send(ctx, id, "دریافت تنظیمات دعوت ممکن نشد.")
+		return
+	}
+	p, err := b.Store.ReferralProgress(ctx, id)
+	if err != nil {
+		b.send(ctx, id, "دریافت آمار دعوت ممکن نشد.")
+		return
+	}
+	message := fmt.Sprintf("دعوت موفق: %d\nدعوت برای پاداش بعدی: %d از %d\nپاداش در انتظار: %d روز و %d گیبی‌بایت", p.Total, p.Unused, cfg.Threshold, p.PendingDays, p.PendingGiB)
+	if !cfg.Enabled {
+		b.send(ctx, id, "دعوت دوستان در حال حاضر غیرفعال است.\n"+message)
+		return
+	}
+	var me struct {
+		Username string `json:"username"`
+	}
+	if err := b.call(ctx, "getMe", params{}, &me); err != nil || me.Username == "" {
+		b.send(ctx, id, "دریافت لینک دعوت ممکن نشد. دوباره تلاش کنید.\n"+message)
+		return
+	}
+	b.send(ctx, id, fmt.Sprintf("لینک دعوت شما\nhttps://t.me/%s?start=ref_%s\n\n%s\nپاداش هر گروه: %d روز و %d گیبی‌بایت", me.Username, p.Code, message, cfg.Days, cfg.GiB))
 }

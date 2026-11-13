@@ -94,6 +94,7 @@ func main() {
 	go api.RunWebhooks(ctx)
 	go w.MonitorRoutes(ctx, public)
 	go maintain(ctx, s, w, refresh)
+	go s.WatchReferralRewards(ctx, func(err error) { log.Print("Cannot apply Telegram referral rewards: ", err) })
 	go telegram.WatchSettings(ctx, s, public, os.Getenv("TELEGRAM_BOT_TEST") == "true", telegram.Settings{
 		Token: os.Getenv("TELEGRAM_BOT_TOKEN"), Terms: os.Getenv("TELEGRAM_BOT_TERMS"), Support: os.Getenv("TELEGRAM_BOT_SUPPORT"),
 	})

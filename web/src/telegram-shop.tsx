@@ -76,7 +76,7 @@ export function TelegramShop({groups,canEdit}:{groups:Group[];canEdit:boolean}) 
  }
 
  return <>
-  {canEdit&&<TelegramSettings/>}
+  {canEdit&&<><TelegramSettings/><ReferralSettings/></>}
   {error&&<p role="alert" className="form-error">{error}</p>}
   <div className="section-heading"><h2>پلن‌های بات</h2>{canEdit&&<button className="primary" onClick={()=>setEditing({id:'',name:'',days:30,quota_bytes:0,group_id:groups[0]?.id??'',stars:0,purchase_limit:0,enabled:true})}>پلن جدید</button>}</div>
   {editing&&<form className="card settings-form" key={editing.id} onSubmit={save}>
@@ -144,6 +144,47 @@ function TelegramSettings() {
     <button className="primary" disabled={busy}>ذخیره تنظیمات بات</button>
     {settings.has_token&&<button type="button" className="secondary danger" disabled={busy} onClick={()=>{if(confirm('توکن حذف و بات متوقف شود؟'))void save(true)}}>حذف توکن و توقف بات</button>}
    </div>
+  </form>}
+ </section>;
+}
+
+type ReferralConfig = {enabled:boolean;threshold:number;days:number;gib:number};
+
+function ReferralSettings() {
+ const [config,setConfig]=useState<ReferralConfig|null>(null);
+ const [busy,setBusy]=useState(false);
+ const [error,setError]=useState('');
+ const [saved,setSaved]=useState(false);
+ useEffect(()=>{
+  api<ReferralConfig>('/bot/referrals').then(setConfig).catch(e=>setError(e.message));
+ },[]);
+
+ async function save(event:FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+  const data=new FormData(event.currentTarget);
+  setBusy(true);
+  setError('');
+  setSaved(false);
+  try {
+   setConfig(await api<ReferralConfig>('/bot/referrals','PUT',{
+    enabled:data.has('enabled'),threshold:Number(data.get('threshold')),
+    days:Number(data.get('days')),gib:Number(data.get('gib')),
+   }));
+   setSaved(true);
+  } catch(e){setError((e as Error).message)}
+  finally{setBusy(false)}
+ }
+
+ return <section>
+  <h2>تنظیمات دعوت</h2>
+  {error&&<p role="alert" className="form-error">{error}</p>}
+  {saved&&<p role="status">تنظیمات دعوت ذخیره شد.</p>}
+  {config&&<form className="card settings-form" onSubmit={save} onChange={()=>setSaved(false)}>
+   <label><input type="checkbox" name="enabled" defaultChecked={config.enabled}/> فعال‌سازی دعوت دوستان</label>
+   <label className="field">تعداد دعوت برای هر پاداش<input type="number" name="threshold" min={1} max={1000000} required defaultValue={config.threshold}/></label>
+   <label className="field">روز اعتبار<input type="number" name="days" min={0} max={3650} required defaultValue={config.days}/></label>
+   <label className="field">حجم اضافه (GiB)<input type="number" name="gib" min={0} max={1000000} required defaultValue={config.gib}/></label>
+   <button className="primary" disabled={busy}>ذخیره تنظیمات دعوت</button>
   </form>}
  </section>;
 }

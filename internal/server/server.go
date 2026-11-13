@@ -80,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/bot/plans", s.authorize(s.botPlans))
 	m.HandleFunc("GET /api/v1/bot/settings", s.authorize(s.botSettings))
 	m.HandleFunc("PUT /api/v1/bot/settings", s.authorize(s.botSettings))
+	m.HandleFunc("GET /api/v1/bot/referrals", s.authorize(s.referralSettings))
+	m.HandleFunc("PUT /api/v1/bot/referrals", s.authorize(s.referralSettings))
 	m.HandleFunc("POST /api/v1/bot/plans", s.authorize(s.saveBotPlan))
 	m.HandleFunc("PUT /api/v1/bot/plans/{id}", s.authorize(s.saveBotPlan))
 	m.HandleFunc("GET /api/v1/bot/orders", s.authorize(s.botOrders))

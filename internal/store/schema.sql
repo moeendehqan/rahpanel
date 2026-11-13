@@ -105,3 +105,15 @@ $$;
 CREATE OR REPLACE TRIGGER user_webhook_changes
 AFTER INSERT OR UPDATE OF enabled,expires_at,quota_bytes,used_bytes ON users
 FOR EACH ROW EXECUTE FUNCTION observe_user_webhook();
+CREATE TABLE IF NOT EXISTS bot_referral_users (
+    telegram_id bigint PRIMARY KEY, code text NOT NULL UNIQUE,
+    total bigint NOT NULL DEFAULT 0, unused bigint NOT NULL DEFAULT 0
+);
+ALTER TABLE bot_referral_users ADD COLUMN IF NOT EXISTS inviter bigint REFERENCES bot_referral_users(telegram_id);
+ALTER TABLE bot_referral_users ADD COLUMN IF NOT EXISTS started boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS bot_referral_rewards (
+    invitee bigint PRIMARY KEY REFERENCES bot_referral_users(telegram_id),
+    inviter bigint NOT NULL REFERENCES bot_referral_users(telegram_id),
+    days bigint NOT NULL, gib bigint NOT NULL, applied_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS bot_referral_pending ON bot_referral_rewards(inviter) WHERE applied_at IS NULL;
