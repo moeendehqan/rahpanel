@@ -18,6 +18,7 @@ import (
 )
 
 type SSHCredentials struct {
+	Hysteria2 *bool `json:"hysteria2,omitempty"`
 	Ports       *core.NodePorts `json:"ports,omitempty"`
 	Host        string          `json:"host"`
 	Port        int             `json:"port"`
@@ -166,6 +167,7 @@ func preflightScript(n core.Node) (string, error) {
 		ports = append(ports, strconv.Itoa(nginxSitePort))
 	}
 	return "node_id=" + shellQuote(n.ID) + "\nports=" + shellQuote(strings.Join(ports, " ")) +
+		"\nhysteria2=" + strconv.FormatBool(n.Hysteria2) +
 		"\nnginx_candidate=" + strconv.FormatBool(nginxCandidate) +
 		"\nnginx_backend=" + strconv.FormatBool(n.RealityBehindNginx) +
 		"\nnginx_site_port=" + strconv.Itoa(nginxSitePort) + "\n" + preflight, nil
@@ -223,6 +225,21 @@ for port in $ports; do
    }'; then echo "PORT_CONFLICT:$port"; exit 1; fi
  fi
 done
+if "$hysteria2"; then
+ listeners=$(ss -H -lunp 'sport = :443')
+ if [ -n "$listeners" ] && { [ -z "$pid" ] || [ "$pid" = 0 ] ||
+  ! printf '%s\n' "$listeners" | awk -v expected="$pid" '
+    { line=$0; found=0;
+      while(match(line,/pid=[0-9]+/)) {
+        if(substr(line,RSTART,RLENGTH)!="pid="expected) exit 1;
+        found=1; line=substr(line,RSTART+RLENGTH);
+      }
+      if(!found) exit 1
+    }'; }; then
+  echo UDP_443_CONFLICT
+  exit 1
+ fi
+fi
 uname -m
 `
 
@@ -234,6 +251,9 @@ func installNodeScript(stage string, n core.Node) (string, error) {
 	rules := []string{}
 	for _, port := range p.Public() {
 		rules = append(rules, fmt.Sprintf(" ufw allow %d/tcp comment 'rahpanel'", port))
+	}
+	if n.Hysteria2 {
+		rules = append(rules, " ufw allow 443/udp comment 'rahpanel'")
 	}
 	return "stage=" + shellQuote(stage) + "\nnode_id=" + shellQuote(n.ID) + "\n" + strings.ReplaceAll(installScript, "FIREWALL_RULES", strings.Join(rules, "\n")), nil
 }

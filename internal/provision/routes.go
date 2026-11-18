@@ -17,10 +17,11 @@ var routeKinds = []string{"reality", "websocket", "trojan"}
 type routeKey struct {
 	id, host, domain, publicKey, sni, shortID, wsPath string
 	ports                                             core.NodePorts
+	hysteria2                                         bool
 }
 
 func keyFor(n core.Node) routeKey {
-	return routeKey{n.ID, n.Host, n.Domain, n.RealityPublic, n.RealitySNI, n.ShortID, n.WSPath, n.EffectivePorts()}
+	return routeKey{n.ID, n.Host, n.Domain, n.RealityPublic, n.RealitySNI, n.ShortID, n.WSPath, n.EffectivePorts(), n.Hysteria2}
 }
 
 type routeSample struct {
@@ -127,7 +128,11 @@ func (w *Worker) checkRoutes(ctx context.Context, publicURL string) {
 		if fetchProbeHealth(ctx, client, publicURL) != nil {
 			continue
 		}
-		for _, kind := range routeKinds {
+		kinds := routeKinds
+		if n.Hysteria2 {
+			kinds = append(slices.Clone(routeKinds), "hysteria2")
+		}
+		for _, kind := range kinds {
 			start := time.Now()
 			err := probeTransport(ctx, binary, n, kind, publicURL)
 			if ctx.Err() != nil {

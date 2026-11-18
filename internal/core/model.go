@@ -27,6 +27,7 @@ type RouteQuality struct {
 
 type Node struct {
 	RouteQuality   map[string]RouteQuality `json:"route_quality,omitempty"`
+	Hysteria2      bool                    `json:"hysteria2"`
 	SharedHost     bool                    `json:"shared_host"`
 	Ports          NodePorts               `json:"ports"`
 	PortsLocked    bool                    `json:"ports_locked"`

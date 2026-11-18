@@ -65,6 +65,13 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Node IP changed; start installation again using the new address")
 		return
 	}
+	if r.SSH.Hysteria2 != nil {
+		n.Hysteria2 = *r.SSH.Hysteria2
+	}
+	if n.Hysteria2 && !hysteria2AcceptanceVerified {
+		fail("Hysteria 2 requires a release validated for per-user accounting and active session revocation")
+		return
+	}
 	var cfg Settings
 	if e = w.Store.GetSetting(ctx, "provider", &cfg); e != nil || cfg.Validate() != nil {
 		fail("Configure domain, Cloudflare and panel URLs first")
@@ -98,6 +105,10 @@ func (w *Worker) run(parent context.Context, r Request) {
 	if e != nil {
 		for _, line := range strings.Split(string(pre), "\n") {
 			line = strings.TrimSpace(line)
+			if line == "UDP_443_CONFLICT" {
+				fail("UDP port 443 is already used by another service")
+				return
+			}
 			if strings.HasPrefix(line, "PORT_CONFLICT:") {
 				port, err := strconv.Atoi(strings.TrimPrefix(line, "PORT_CONFLICT:"))
 				if err == nil {
@@ -207,7 +218,7 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("Cannot protect node identity")
 		return
 	}
-	if _, e = w.Store.DB.ExecContext(ctx, "UPDATE nodes SET client_serial=$2,client_cert=$3,client_key=$4,reality_behind_nginx=$5,previous_serial='',previous_until=NULL,ready=false,verified='[]' WHERE id=$1", n.ID, serial, crt, sealedClientKey, n.RealityBehindNginx); e != nil {
+	if _, e = w.Store.DB.ExecContext(ctx, "UPDATE nodes SET client_serial=$2,client_cert=$3,client_key=$4,reality_behind_nginx=$5,hysteria2=$6,previous_serial='',previous_until=NULL,ready=false,verified='[]' WHERE id=$1", n.ID, serial, crt, sealedClientKey, n.RealityBehindNginx, n.Hysteria2); e != nil {
 		fail("Cannot activate node identity")
 		return
 	}
@@ -250,6 +261,13 @@ func (w *Worker) run(parent context.Context, r Request) {
 		fail("No transport reachable from panel; check provider firewall, DNS and node agent")
 		return
 	}
+	if n.Hysteria2 {
+		if verifyTransport(ctx, n, "hysteria2", cfg.PublicURL) == nil {
+			verified = append(verified, "hysteria2")
+		} else {
+			j.Error = "Hysteria 2 failed verification; check UDP 443 and TLS certificate"
+		}
+	}
 	encoded, _ := json.Marshal(verified)
 	if _, e = w.Store.DB.ExecContext(ctx, "UPDATE nodes SET ready=true,verified=$2 WHERE id=$1", n.ID, encoded); e != nil {
 		fail("Cannot publish verified transports")
@@ -257,7 +275,11 @@ func (w *Worker) run(parent context.Context, r Request) {
 	}
 	j.Status = "completed"
 	j.Step = "ready"
-	if len(verified) < 3 {
+	expected := 3
+	if n.Hysteria2 {
+		expected++
+	}
+	if len(verified) < expected && j.Error == "" {
 		j.Error = "Some transports failed verification and were not published"
 	}
 	_ = w.Store.Job(ctx, j)

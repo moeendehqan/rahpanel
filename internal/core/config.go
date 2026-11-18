@@ -25,8 +25,9 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 			active[u.ID] = true
 		}
 	}
-	reality, ws, trojan := []any{}, []any{}, []any{}
+	reality, ws, trojan, hysteria := []any{}, []any{}, []any{}, []any{}
 	probe := ProbeCredential(n)
+	hysteria = append(hysteria, map[string]any{"auth": probe.Password, "email": "rah-probe"})
 	reality = append(reality, map[string]any{"id": probe.UUID, "flow": "xtls-rprx-vision"})
 	ws = append(ws, map[string]any{"id": probe.UUID})
 	trojan = append(trojan, map[string]any{"password": probe.Password})
@@ -35,6 +36,7 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 			continue
 		}
 		email := c.UserID
+		hysteria = append(hysteria, map[string]any{"auth": c.Password, "email": email, "level": 0})
 		reality = append(reality, map[string]any{"id": c.UUID, "email": email, "flow": "xtls-rprx-vision", "level": 0})
 		ws = append(ws, map[string]any{"id": c.UUID, "email": email, "level": 0})
 		trojan = append(trojan, map[string]any{"password": c.Password, "email": email, "level": 0})
@@ -68,6 +70,9 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 			map[string]any{"type": "field", "ip": []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8"}, "outboundTag": "block"},
 		}},
 	}
+	if n.Hysteria2 {
+		cfg["inbounds"] = append(cfg["inbounds"].([]any), inbound("hysteria2", "hysteria", Hysteria2Port, hysteria, map[string]any{"network": "hysteria", "security": "tls", "tlsSettings": tls, "hysteriaSettings": map[string]any{"version": 2}}))
+	}
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
@@ -77,7 +82,13 @@ func ProbeCredential(n Node) Credential {
 	return Credential{UUID: fmt.Sprintf("%x-%x-%x-%x-%x", h[:4], h[4:6], h[6:8], h[8:10], h[10:16]), Password: base64.RawURLEncoding.EncodeToString(h[16:])}
 }
 
+const Hysteria2Port = 443
+
 func Subscription(nodes []Node, creds []Credential) string {
+	return subscription(nodes, creds, false)
+}
+
+func subscription(nodes []Node, creds []Credential, includeHysteria bool) string {
 	type routeLine struct {
 		url     string
 		quality RouteQuality
@@ -117,6 +128,12 @@ func Subscription(nodes []Node, creds []Credential) string {
 					q.Set("host", n.Domain)
 					q.Set("path", n.WSPath)
 					q.Set("encryption", "none")
+				case "hysteria2":
+					if !includeHysteria || !n.Hysteria2 {
+						continue
+					}
+					scheme, secret, port = "hysteria2", c.Password, Hysteria2Port
+					q.Set("sni", n.Domain)
 				case "trojan":
 					scheme = "trojan"
 					secret = c.Password

@@ -295,7 +295,7 @@ function RouteCheckTime({value}: {value: string}) {
 function RouteChecks({node}: {node: VPNNode}) {
   if (!node.ready && !node.verified?.length && !Object.keys(node.route_quality ?? {}).length) return <span className="muted">پس از نصب</span>;
 
-  return <div className="tags">{['reality', 'websocket', 'trojan'].map(protocol => {
+  return <div className="tags">{(node.hysteria2 ? ['reality', 'websocket', 'trojan', 'hysteria2'] : ['reality', 'websocket', 'trojan']).map(protocol => {
     const quality = node.route_quality?.[protocol];
     const verified = node.verified?.includes(protocol);
     return <details className="route-check" key={protocol}>
@@ -398,12 +398,14 @@ function NodeForm({groups,close,save}:{groups:Group[];close:()=>void;save:(v:unk
  {error&&<p role="alert" className="form-error">{error}</p>}<button className="primary" disabled={busy}>ادامه و بررسی دسترسی<ChevronLeft size={17}/></button></form></Modal>
 }
 function InstallForm({node,close,save}:{node:VPNNode;close:()=>void;save:(v:unknown)=>Promise<void>}){
+ const [hysteria2,setHysteria2]=useState(node.hysteria2??false);
  const [fp,setFP]=useState(''),[port,setPort]=useState(22),[ports,setPorts]=useState(node.ports||defaultPorts(node.shared_host)),[error,setError]=useState(''),[busy,setBusy]=useState(false),[mode,setMode]=useState('password');
  return <Modal title={'راه‌اندازی '+node.name} close={close}><p className="muted">ابتدا اثر انگشت را با کنسول ارائه‌دهنده مقایسه کنید؛ اعتبارنامه فقط برای همین نصب استفاده می‌شود.</p>
  {node.shared_host&&<p className="muted">نصب روی سرور مشترک؛ سرویس‌های دیگر متوقف نمی‌شوند. اگر پورتی اشغال باشد، پیش از نصب خطا نمایش داده می‌شود.</p>}
- <form onSubmit={async e=>{e.preventDefault();setError('');setBusy(true);try{const selected=checkedPorts(ports,node.shared_host);if(!fp){const r=await api<{fingerprint:string}>('/ssh/fingerprint','POST',{host:node.host,port});setFP(r.fingerprint)}else{const f=new FormData(e.currentTarget);await save({host:node.host,port,ports:selected,username:f.get('username'),password:mode==='password'?f.get('password'):'',private_key:mode==='key'?f.get('private_key'):'',fingerprint:fp})}}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>
+ <form onSubmit={async e=>{e.preventDefault();setError('');setBusy(true);try{const selected=checkedPorts(ports,node.shared_host);if(!fp){const r=await api<{fingerprint:string}>('/ssh/fingerprint','POST',{host:node.host,port});setFP(r.fingerprint)}else{const f=new FormData(e.currentTarget);await save({host:node.host,port,ports:selected,hysteria2,username:f.get('username'),password:mode==='password'?f.get('password'):'',private_key:mode==='key'?f.get('private_key'):'',fingerprint:fp})}}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>
  <Field label="پورت SSH"><input type="number" min="1" max="65535" value={port} onChange={e=>{setPort(Number(e.target.value));setFP('')}} required/></Field>
  <PortFields ports={ports} onChange={setPorts} disabled={node.ready||node.ports_locked}/>
+ <label className="checkbox"><input type="checkbox" checked={hysteria2} onChange={e=>setHysteria2(e.target.checked)}/>فعال‌سازی Hysteria 2 روی UDP 443</label>
  {(node.ready||node.ports_locked)&&<p className="muted">پس از فعال‌سازی هویت نود، پورت‌های آن در نصب مجدد حفظ می‌شوند.</p>}
  {fp&&<><div className="fingerprint"><ShieldCheck size={20}/><code dir="ltr">{fp}</code></div><Field label="نام کاربری SSH (root یا sudo بدون تعامل)"><input name="username" dir="ltr" defaultValue="root" autoComplete="off" required/></Field><Field label="نوع دسترسی"><select value={mode} onChange={e=>setMode(e.target.value)}><option value="password">رمز عبور</option><option value="key">کلید خصوصی</option></select></Field>{mode==='password'?<Field label="رمز SSH"><input name="password" type="password" autoComplete="off" required/></Field>:<Field label="کلید خصوصی بدون گذرواژه"><textarea name="private_key" dir="ltr" rows={5} required/></Field>}<label className="checkbox"><input type="checkbox" required/>اثر انگشت سرور را تأیید می‌کنم.</label></>}
  {error&&<p role="alert" className="form-error">{error}</p>}<button className="primary" disabled={busy}>{busy?'در حال بررسی…':fp?'تأیید و نصب خودکار':'دریافت اثر انگشت SSH'}</button></form></Modal>

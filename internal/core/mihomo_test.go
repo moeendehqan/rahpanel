@@ -59,3 +59,23 @@ func TestMihomoFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoHysteria2Fallback(t *testing.T) {
+	node := Node{ID: "n", Name: "node", Domain: "n.example.com", Ready: true, Hysteria2: true, Verified: []string{"trojan", "hysteria2", "reality"}}
+	creds := []Credential{{NodeID: node.ID, UUID: "123", Password: "secret"}}
+	plain := Subscription([]Node{node}, creds)
+	output := MihomoSubscription([]Node{node}, creds)
+	for _, want := range []string{
+		`"port":443,"server":"n.example.com","skip-cert-verify":false,"sni":"n.example.com","type":"hysteria2"`,
+		`"proxies":["Rah Auto","1 · node · trojan","2 · node · hysteria2","3 · node · reality"]`,
+		`"proxies":["3 · node · reality","2 · node · hysteria2","1 · node · trojan"]`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing %s in %s", want, output)
+		}
+	}
+	node.Hysteria2 = false
+	if Subscription([]Node{node}, creds) != plain || strings.Contains(MihomoSubscription([]Node{node}, creds), "hysteria2") {
+		t.Fatal("Hysteria 2 escaped its Mihomo-only activation gate")
+	}
+}

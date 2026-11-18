@@ -18,6 +18,9 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+// Set after the pinned release passes TCP/UDP accounting and revocation checks.
+const hysteria2AcceptanceVerified = false
+
 var (
 	errProbeStartup    = errors.New("probe client did not start")
 	errProbeConnection = errors.New("authenticated probe failed")
@@ -62,7 +65,11 @@ func probeTransport(ctx context.Context, binary []byte, n core.Node, kind, healt
 		user = map[string]any{"id": credential.UUID, "encryption": "none"}
 		stream = map[string]any{"network": "ws", "security": "tls", "tlsSettings": map[string]any{"serverName": n.Domain}, "wsSettings": map[string]any{"path": n.WSPath, "headers": map[string]string{"Host": n.Domain}}}
 	}
-	if kind == "trojan" {
+	if kind == "hysteria2" {
+		protocol = "hysteria"
+		settings = map[string]any{"version": 2, "address": n.Host, "port": core.Hysteria2Port}
+		stream = map[string]any{"network": "hysteria", "security": "tls", "tlsSettings": map[string]any{"serverName": n.Domain}, "hysteriaSettings": map[string]any{"version": 2, "auth": credential.Password}}
+	} else if kind == "trojan" {
 		protocol = "trojan"
 		targetPort = ports.Trojan
 		settings["servers"] = []any{map[string]any{"address": n.Host, "port": targetPort, "password": credential.Password}}
