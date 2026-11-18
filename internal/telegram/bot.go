@@ -57,9 +57,22 @@ type update struct {
 	} `json:"pre_checkout_query"`
 }
 type button struct {
-	Text string `json:"text"`
-	Data string `json:"callback_data"`
+	Text     string            `json:"text"`
+	Data     string            `json:"callback_data,omitempty"`
+	CopyText map[string]string `json:"copy_text,omitempty"`
 }
+
+var homeRow = []button{{Text: "🏠 منوی اصلی", Data: "home"}}
+var plansRow = []button{{Text: "مشاهده پلن‌ها", Data: "list"}}
+var supportRow = []button{{Text: "پشتیبانی", Data: "support"}}
+
+func copyRow(label, value string) []button {
+	if len([]rune(value)) > 256 {
+		return nil
+	}
+	return []button{{Text: label, CopyText: map[string]string{"text": value}}}
+}
+
 type params map[string]any
 
 var client = &http.Client{Timeout: 40 * time.Second}
@@ -135,22 +148,45 @@ func (b Bot) Run(ctx context.Context) {
 
 func (b Bot) send(ctx context.Context, id int64, text string, buttons ...[]button) {
 	p := params{"chat_id": id, "text": text, "link_preview_options": params{"is_disabled": true}}
-	if len(buttons) > 0 {
-		p["reply_markup"] = params{"inline_keyboard": buttons}
+	var keyboard [][]button
+	for _, row := range buttons {
+		if len(row) > 0 {
+			keyboard = append(keyboard, row)
+		}
+	}
+	if len(keyboard) > 0 {
+		p["reply_markup"] = params{"inline_keyboard": keyboard}
 	}
 	if err := b.call(ctx, "sendMessage", p, nil); err != nil && ctx.Err() == nil {
 		log.Print(err)
 	}
 }
 
+func (b Bot) home(ctx context.Context, id int64) {
+	b.send(ctx, id, "سلام! 👋\nبرای خرید یا تمدید اشتراک، پلن‌ها را ببینید. اگر از قبل اشتراک دارید، آن را به حساب تلگرام وصل کنید.",
+		[]button{{Text: "🛒 خرید یا تمدید", Data: "list"}, {Text: "👤 اشتراک من", Data: "mine"}},
+		[]button{{Text: "🔗 اتصال اشتراک", Data: "link"}, {Text: "🎁 دعوت دوستان", Data: "referrals"}},
+		supportRow)
+}
+
+func (b Bot) linkHelp(ctx context.Context, id int64) {
+	b.send(ctx, id, "🔗 اتصال اشتراک موجود\nاز مدیر کد اتصال بگیرید و دستور دریافتی را همین‌جا بفرستید.\n\nنمونه: /link کد", homeRow)
+}
+
+func (b Bot) support(ctx context.Context, id int64) {
+	b.send(ctx, id, "💬 پشتیبانی\nبرای پیگیری اشتراک یا پرداخت با این نشانی تماس بگیرید:\n"+b.Support,
+		[]button{{Text: "شرایط خرید", Data: "terms"}}, homeRow)
+}
+
 func (b Bot) showUser(ctx context.Context, id int64) {
 	u, err := b.Store.BotUser(ctx, id)
 	if err != nil {
-		b.send(ctx, id, "دریافت وضعیت اشتراک ممکن نشد. دوباره تلاش کنید.")
+		b.send(ctx, id, "دریافت وضعیت اشتراک ممکن نشد. دوباره تلاش کنید.", []button{{Text: "تلاش دوباره", Data: "mine"}}, homeRow)
 		return
 	}
 	if u.ID == "" {
-		b.send(ctx, id, "اشتراکی به حساب تلگرام شما متصل نیست.")
+		b.send(ctx, id, "اشتراکی به حساب تلگرام شما متصل نیست. می‌توانید اشتراک بگیرید یا اشتراک فعلی‌تان را وصل کنید.",
+			plansRow, []button{{Text: "اتصال اشتراک موجود", Data: "link"}}, homeRow)
 		return
 	}
 	state := "فعال"
@@ -166,8 +202,10 @@ func (b Bot) showUser(ctx context.Context, id int64) {
 	if u.QuotaBytes > 0 {
 		remaining = volume(max(0, u.QuotaBytes-u.UsedBytes), false)
 	}
-	b.send(ctx, id, fmt.Sprintf("وضعیت: %s\nانقضا: %s\nحجم باقی‌مانده: %s\nلینک اشتراک:\n%s/sub/%s", state,
-		u.ExpiresAt.In(time.FixedZone("IRST", 12600)).Format("2006-01-02 15:04"), remaining, strings.TrimRight(b.PublicURL, "/"), u.Token))
+	link := strings.TrimRight(b.PublicURL, "/") + "/sub/" + u.Token
+	b.send(ctx, id, fmt.Sprintf("👤 اشتراک من\n\nوضعیت: %s\nانقضا (به وقت تهران): %s\nحجم باقی‌مانده: %s\n\nلینک اشتراک را در برنامه اتصال خود وارد کنید. این لینک مخصوص حساب شماست.\n%s", state,
+		u.ExpiresAt.In(time.FixedZone("IRST", 12600)).Format("2006-01-02 15:04"), remaining, link),
+		copyRow("📋 کپی لینک اشتراک", link), []button{{Text: "تمدید اشتراک", Data: "list"}}, homeRow)
 }
 
 func volume(n int64, unlimited bool) string {
@@ -186,7 +224,7 @@ func volume(n int64, unlimited bool) string {
 func offer(p store.BotPlan) string {
 	price := "رایگان"
 	if p.Stars > 0 {
-		price = fmt.Sprintf("%d Stars", p.Stars)
+		price = fmt.Sprintf("%d ⭐", p.Stars)
 	}
 	return fmt.Sprintf("%s · %d روز · %s · %s", p.Name, p.Days, volume(p.QuotaBytes, true), price)
 }
@@ -194,31 +232,32 @@ func offer(p store.BotPlan) string {
 func (b Bot) list(ctx context.Context, id int64) {
 	u, err := b.Store.BotUser(ctx, id)
 	if err != nil {
-		b.send(ctx, id, "دریافت اشتراک ممکن نشد. دوباره تلاش کنید.")
+		b.send(ctx, id, "دریافت اشتراک ممکن نشد. دوباره تلاش کنید.", plansRow, homeRow)
 		return
 	}
 	if u.ID != "" && !u.Enabled {
-		b.send(ctx, id, "اشتراک غیرفعال است. با مدیر تماس بگیرید.")
+		b.send(ctx, id, "اشتراک غیرفعال است. برای بررسی با پشتیبانی تماس بگیرید.", supportRow, homeRow)
 		return
 	}
 	plans, err := b.Store.BotPlans(ctx)
 	if err != nil {
-		b.send(ctx, id, "دریافت پلن‌ها ممکن نشد. دوباره تلاش کنید.")
+		b.send(ctx, id, "دریافت پلن‌ها ممکن نشد. دوباره تلاش کنید.", plansRow, homeRow)
 		return
 	}
 	var buttons [][]button
 	for _, p := range plans {
 		if p.Enabled && (u.ID == "" || (u.GroupID == p.GroupID && (p.Stars > 0 || !u.Active(time.Now())))) {
-			buttons = append(buttons, []button{{offer(p), "plan:" + p.ID}})
+			buttons = append(buttons, []button{{Text: offer(p), Data: "plan:" + p.ID}})
 		}
 	}
 	if len(buttons) == 0 {
-		b.send(ctx, id, "پلن قابل انتخابی برای حساب شما وجود ندارد.")
+		b.send(ctx, id, "در حال حاضر پلنی برای حساب شما قابل انتخاب نیست.", supportRow, homeRow)
 		return
 	}
 	for len(buttons) > 0 {
 		n := min(len(buttons), 20)
-		b.send(ctx, id, "پلن مورد نظر را انتخاب کنید.", buttons[:n]...)
+		rows := append(buttons[:n:n], homeRow)
+		b.send(ctx, id, "🛒 انتخاب پلن\nمدت، حجم و قیمت روی هر دکمه آمده است.", rows...)
 		buttons = buttons[n:]
 	}
 }
@@ -252,6 +291,14 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		cancel()
 		action, arg, _ := strings.Cut(q.Data, ":")
 		switch action {
+		case "home":
+			b.home(ctx, id)
+		case "link":
+			b.linkHelp(ctx, id)
+		case "support":
+			b.support(ctx, id)
+		case "terms":
+			b.send(ctx, id, "شرایط خرید\n\n"+b.Terms, homeRow)
 		case "list":
 			b.list(ctx, id)
 		case "mine":
@@ -261,26 +308,27 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		case "plan":
 			order, err := b.Store.PrepareBotOrder(ctx, id, arg)
 			if err != nil {
-				b.send(ctx, id, "این پلن در حال حاضر برای حساب شما قابل دریافت نیست.")
+				b.send(ctx, id, "این پلن در حال حاضر برای حساب شما قابل دریافت نیست.", plansRow, homeRow)
 				return nil
 			}
 			label, action := "تأیید دریافت رایگان", "free:"
 			if order.Plan.Stars > 0 {
 				label, action = "پذیرش شرایط و دریافت فاکتور", "invoice:"
 			}
-			text := offer(order.Plan)
+			text := "جزئیات سفارش\n\n" + offer(order.Plan)
 			if order.Plan.Stars > 0 {
 				text += "\n\nشرایط خرید\n" + b.Terms
 			}
-			b.send(ctx, id, text, []button{{label, action + order.ID}})
+			b.send(ctx, id, text, []button{{Text: label, Data: action + order.ID}},
+				[]button{{Text: "بازگشت به پلن‌ها", Data: "list"}}, homeRow)
 		case "free", "invoice":
 			result, err := b.Store.ProcessBotOrder(ctx, arg, id, action, "", 0, "")
 			if errors.Is(err, store.ErrBotPurchaseLimit) {
-				b.send(ctx, id, "سقف خرید این پلن برای حساب شما تکمیل شده است.")
+				b.send(ctx, id, "سقف خرید این پلن برای حساب شما تکمیل شده است.", plansRow, homeRow)
 				return nil
 			}
 			if err != nil {
-				b.send(ctx, id, "درخواست انجام نشد. وضعیت اشتراک را بررسی کنید و دوباره تلاش کنید.")
+				b.send(ctx, id, "درخواست انجام نشد. پلن را دوباره انتخاب کنید یا با پشتیبانی تماس بگیرید.", plansRow, supportRow, homeRow)
 				return nil
 			}
 			if action == "free" {
@@ -290,7 +338,7 @@ func (b Bot) handle(ctx context.Context, u update) error {
 			amount, _ := strconv.Atoi(result)
 			if err = b.call(ctx, "sendInvoice", params{"chat_id": id, "title": "اشتراک VPN", "description": "خرید یا تمدید اشتراک VPN", "payload": arg,
 				"currency": "XTR", "start_parameter": "buy", "prices": []params{{"label": "اشتراک VPN", "amount": amount}}}, nil); err != nil {
-				b.send(ctx, id, "ارسال فاکتور ممکن نشد. دوباره دکمه تأیید را بزنید.")
+				b.send(ctx, id, "ارسال فاکتور ممکن نشد.", []button{{Text: "ارسال دوباره فاکتور", Data: "invoice:" + arg}}, homeRow)
 			}
 		}
 		return nil
@@ -304,11 +352,11 @@ func (b Bot) handle(ctx context.Context, u update) error {
 		status, err := b.Store.ProcessBotOrder(ctx, p.Order, id, "receipt", p.Currency, p.Total, p.Charge)
 		switch {
 		case errors.Is(err, store.ErrBotUnavailable):
-			b.send(ctx, id, "پرداخت نیاز به بررسی دارد. از /paysupport استفاده کنید.")
+			b.send(ctx, id, "پرداخت نیاز به بررسی دارد. برای پیگیری با پشتیبانی تماس بگیرید.", supportRow, homeRow)
 		case err != nil:
 			return errors.New("could not store Telegram payment")
 		case status == "review":
-			b.send(ctx, id, "پرداخت ثبت شد و نیاز به بررسی مدیر دارد. از /paysupport استفاده کنید.")
+			b.send(ctx, id, "پرداخت ثبت شد و نیاز به بررسی مدیر دارد.", supportRow, homeRow)
 		default:
 			b.showUser(ctx, id)
 		}
@@ -334,22 +382,27 @@ func (b Bot) handle(ctx context.Context, u update) error {
 	case "/invite":
 		b.showReferrals(ctx, id)
 	case "/paysupport", "/support":
-		b.send(ctx, id, "پشتیبانی خرید\n"+b.Support)
+		b.support(ctx, id)
 	case "/terms":
-		b.send(ctx, id, b.Terms)
+		b.send(ctx, id, "شرایط خرید\n\n"+b.Terms, homeRow)
 	case "/link", "/start":
 		if len(parts) == 2 && (cmd == "/link" || strings.HasPrefix(parts[1], "link_")) {
 			code := strings.TrimPrefix(parts[1], "link_")
 			if err := b.Store.RedeemBotCode(ctx, id, code); err != nil {
-				b.send(ctx, id, "کد اتصال نامعتبر یا منقضی است، یا اشتراک قبلاً متصل شده است.")
+				b.send(ctx, id, "کد اتصال نامعتبر یا منقضی است، یا اشتراک قبلاً متصل شده است.", []button{{Text: "راهنمای اتصال", Data: "link"}}, homeRow)
 				return nil
 			}
 			b.send(ctx, id, "اشتراک به حساب تلگرام شما متصل شد.")
 			b.showUser(ctx, id)
+			return nil
 		}
-		fallthrough
+		if cmd == "/link" {
+			b.linkHelp(ctx, id)
+			return nil
+		}
+		b.home(ctx, id)
 	default:
-		b.send(ctx, id, "برای اتصال اشتراک فعلی، کد مدیر را با دستور ‎/link‎ بفرستید.", []button{{"خرید یا تمدید", "list"}, {"اشتراک من", "mine"}}, []button{{"دعوت دوستان", "referrals"}})
+		b.home(ctx, id)
 	}
 	return nil
 }
@@ -357,25 +410,27 @@ func (b Bot) handle(ctx context.Context, u update) error {
 func (b Bot) showReferrals(ctx context.Context, id int64) {
 	cfg, err := b.Store.ReferralSettings(ctx)
 	if err != nil {
-		b.send(ctx, id, "دریافت تنظیمات دعوت ممکن نشد.")
+		b.send(ctx, id, "دریافت تنظیمات دعوت ممکن نشد.", homeRow)
 		return
 	}
 	p, err := b.Store.ReferralProgress(ctx, id)
 	if err != nil {
-		b.send(ctx, id, "دریافت آمار دعوت ممکن نشد.")
+		b.send(ctx, id, "دریافت آمار دعوت ممکن نشد.", homeRow)
 		return
 	}
 	message := fmt.Sprintf("دعوت موفق: %d\nدعوت برای پاداش بعدی: %d از %d\nپاداش در انتظار: %d روز و %d گیبی‌بایت", p.Total, p.Unused, cfg.Threshold, p.PendingDays, p.PendingGiB)
 	if !cfg.Enabled {
-		b.send(ctx, id, "دعوت دوستان در حال حاضر غیرفعال است.\n"+message)
+		b.send(ctx, id, "دعوت دوستان در حال حاضر غیرفعال است.\n\n"+message, homeRow)
 		return
 	}
 	var me struct {
 		Username string `json:"username"`
 	}
 	if err := b.call(ctx, "getMe", params{}, &me); err != nil || me.Username == "" {
-		b.send(ctx, id, "دریافت لینک دعوت ممکن نشد. دوباره تلاش کنید.\n"+message)
+		b.send(ctx, id, "دریافت لینک دعوت ممکن نشد. دوباره تلاش کنید.\n\n"+message, []button{{Text: "تلاش دوباره", Data: "referrals"}}, homeRow)
 		return
 	}
-	b.send(ctx, id, fmt.Sprintf("لینک دعوت شما\nhttps://t.me/%s?start=ref_%s\n\n%s\nپاداش هر گروه: %d روز و %d گیبی‌بایت", me.Username, p.Code, message, cfg.Days, cfg.GiB))
+	link := fmt.Sprintf("https://t.me/%s?start=ref_%s", me.Username, p.Code)
+	b.send(ctx, id, fmt.Sprintf("🎁 دعوت دوستان\n\nلینک را برای دوستانتان بفرستید. وقتی برای اولین بار بات را با این لینک شروع کنند، دعوت شما ثبت می‌شود.\n\n%s\nپاداش هر گروه: %d روز و %d گیبی‌بایت\n\n%s", message, cfg.Days, cfg.GiB, link),
+		copyRow("📋 کپی لینک دعوت", link), homeRow)
 }
