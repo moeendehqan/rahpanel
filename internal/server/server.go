@@ -101,7 +101,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/audit", s.authorize(s.audit))
 	m.HandleFunc("GET /api/v1/settings/webhook", s.authorize(s.webhookSettings))
 	m.HandleFunc("PUT /api/v1/settings/webhook", s.authorize(s.webhookSettings))
-	m.HandleFunc("GET /sub/{token}", s.subscription)
+	m.HandleFunc(subscriptionPageRoute, s.subscription)
 	m.HandleFunc("GET /sub/{token}/clash", s.subscription)
 	m.HandleFunc("GET /account/{token}", s.account)
 	m.HandleFunc("POST /api/v1/users/{id}/account", s.authorize(s.accountLink))
@@ -571,6 +571,9 @@ func (s *Server) auditAction(r *http.Request, action, target string) {
 func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	if r.Pattern == subscriptionPageRoute {
+		w.Header().Add("Vary", "Accept, Sec-Fetch-Mode, Sec-Fetch-Dest")
+	}
 	users, e := s.Store.Users(r.Context())
 	if e != nil {
 		problem(w, 503, "Unavailable")
@@ -585,6 +588,10 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 	}
 	if user == nil || !user.Active(time.Now()) {
 		problem(w, 404, "Subscription unavailable")
+		return
+	}
+	if wantsSubscriptionPage(r) {
+		s.renderSubscriptionPage(w, *user)
 		return
 	}
 	nodes, e := s.Store.Nodes(r.Context())

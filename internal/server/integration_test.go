@@ -74,6 +74,89 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 		t.Fatal(e)
 	}
 	srv := New(s, provision.NewWorker(s, ca), "https://panel.example.com", "missing", true)
+	t.Run("subscription browser and client responses", func(t *testing.T) {
+		user := core.User{ID: "subscription-test", Name: "subscription test", GroupID: "default", Enabled: true, ExpiresAt: time.Now().Add(time.Hour), QuotaBytes: 1024}
+		if err := s.SaveUser(context.Background(), user, true); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := s.DB.Exec("DELETE FROM users WHERE id=$1", user.ID); err != nil {
+				t.Error(err)
+			}
+		})
+		users, err := s.Users(context.Background())
+		if err != nil || len(users) != 1 {
+			t.Fatalf("load subscription fixture: %v", err)
+		}
+		user = users[0]
+		path := "/sub/" + user.Token
+		handler := srv.Handler()
+		for _, tc := range []struct {
+			name, method, path, accept, contentType, body string
+			navigate                                      bool
+		}{
+			{"browser", "GET", path, "text/html", "text/html; charset=utf-8", "", true},
+			{"no accept", "GET", path, "", "text/plain; charset=utf-8", core.Subscription(nil, nil), false},
+			{"wildcard", "GET", path, "*/*", "text/plain; charset=utf-8", core.Subscription(nil, nil), false},
+			{"client html accept", "GET", path, "text/html", "text/plain; charset=utf-8", core.Subscription(nil, nil), false},
+			{"mihomo", "GET", path + "/clash", "text/html", "application/yaml; charset=utf-8", core.MihomoSubscription(nil, nil), true},
+			{"head", "HEAD", path, "text/html", "text/plain; charset=utf-8", "", true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				r := httptest.NewRequest(tc.method, tc.path, nil)
+				if tc.accept != "" {
+					r.Header.Set("Accept", tc.accept)
+				}
+				if tc.navigate {
+					r.Header.Set("Sec-Fetch-Mode", "navigate")
+					r.Header.Set("Sec-Fetch-Dest", "document")
+				}
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				h := w.Header()
+				if w.Code != 200 || h.Get("Content-Type") != tc.contentType ||
+					h.Get("Cache-Control") != "no-store" || h.Get("Referrer-Policy") != "no-referrer" {
+					t.Fatalf("unexpected subscription response: %d, %s", w.Code, h.Get("Content-Type"))
+				}
+				if tc.path == path && h.Get("Vary") != "Accept, Sec-Fetch-Mode, Sec-Fetch-Dest" {
+					t.Error("missing subscription variation headers")
+				}
+				if tc.name == "browser" {
+					if !strings.Contains(w.Body.String(), `lang="fa" dir="rtl"`) {
+						t.Error("missing subscription page")
+					}
+					return
+				}
+				if h.Get("Subscription-Userinfo") != usageHeader(user) || h.Get("Profile-Update-Interval") != "1" ||
+					(tc.method != "HEAD" && w.Body.String() != tc.body) {
+					t.Error("subscription payload or metadata changed")
+				}
+			})
+		}
+		for _, tc := range []struct{ name, path, update string }{
+			{"unknown", "/sub/unknown-test-token", ""},
+			{"expired", path, "expires_at=now() - interval '1 hour'"},
+			{"disabled", path, "expires_at=now() + interval '1 hour', enabled=false"},
+			{"quota exhausted", path, "enabled=true, used_bytes=quota_bytes"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if tc.update != "" {
+					if _, err := s.DB.Exec("UPDATE users SET "+tc.update+" WHERE id=$1", user.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				r := httptest.NewRequest("GET", tc.path, nil)
+				r.Header.Set("Accept", "text/html")
+				r.Header.Set("Sec-Fetch-Mode", "navigate")
+				r.Header.Set("Sec-Fetch-Dest", "document")
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != 404 {
+					t.Errorf("got status %d, want 404", w.Code)
+				}
+			})
+		}
+	})
 	t.Run("identity rotation survives lost response", func(t *testing.T) {
 		certPEM, _, serial, err := ca.Issue("rotation-node", false, nil)
 		if err != nil {

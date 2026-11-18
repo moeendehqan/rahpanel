@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>اشتراک راه</title>
+  <style nonce="{{.Nonce}}">
+    :root {
+      color-scheme: light;
+      --canvas: #f4f7f5;
+      --surface: #fff;
+      --ink: #132b25;
+      --muted: #405950;
+      --border: #c7d7cf;
+      --accent: #12614c;
+      --accent-pressed: #0b4939;
+      --on-accent: #fff;
+      --tint: #e1f2e9;
+      font-family: Tahoma, system-ui, sans-serif;
+      line-height: 1.65;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --canvas: #101c18;
+        --surface: #182a23;
+        --ink: #ecf8f1;
+        --muted: #bbd3c7;
+        --border: #426255;
+        --accent: #a6e8ca;
+        --accent-pressed: #c0f2dd;
+        --on-accent: #10271e;
+        --tint: #244439;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); }
+    main { max-inline-size: 51rem; margin-inline: auto; padding: clamp(1rem, 5vw, 3rem); }
+    header { border-block-start: .25rem solid var(--accent); padding-block: 1.5rem; }
+    h1, h2, p, dl, dd { margin: 0; }
+    h1 { font-size: clamp(1.75rem, 5vw, 2.75rem); overflow-wrap: anywhere; }
+    h2 { font-size: 1.25rem; }
+    .status { display: inline-block; margin-block-start: .75rem; padding: .125rem .75rem; border-radius: 2rem; background: var(--tint); }
+    .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: .875rem; overflow: hidden; }
+    .facts div { background: var(--surface); padding: 1rem; }
+    dt, .hint { color: var(--muted); }
+    dd { margin-block-start: .25rem; font-weight: 700; }
+    .links { margin-block-start: 1.25rem; padding: clamp(1rem, 4vw, 1.75rem); background: var(--surface); border: 1px solid var(--border); border-radius: .875rem; }
+    .hint { margin-block: .375rem 1.25rem; }
+    .field + .field { margin-block-start: 1rem; }
+    label { display: block; font-weight: 700; margin-block-end: .375rem; }
+    .controls { display: flex; flex-wrap: wrap; gap: .5rem; }
+    input, button { min-block-size: 2.75rem; border-radius: .5rem; padding: .5rem .75rem; }
+    input { flex: 1 1 15rem; min-inline-size: 0; width: 100%; background: var(--canvas); border: 1px solid var(--border); color: var(--ink); font: 1rem monospace; }
+    button { border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); cursor: pointer; font: inherit; font-weight: 700; }
+    button:is(:hover, :active) { background: var(--accent-pressed); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .feedback { margin-block-start: .375rem; color: var(--muted); }
+    .feedback:empty { margin: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>اشتراک راه{{if .Name}} <bdi>{{.Name}}</bdi>{{end}}</h1>
+      <p class="status">اشتراک فعال</p>
+    </header>
+    <dl class="facts">
+      <div><dt>مصرف</dt><dd>{{.Used}}</dd></div>
+      <div><dt>سقف مصرف</dt><dd>{{.Quota}}</dd></div>
+      <div><dt>انقضا به وقت تهران</dt><dd><time datetime="{{.DateTime}}" dir="ltr">{{.Expiry}}</time></dd></div>
+    </dl>
+    <section class="links" aria-labelledby="links-heading">
+      <h2 id="links-heading">افزودن اشتراک به برنامه</h2>
+      <p class="hint">لینک مناسب را کپی کنید و در بخش افزودن اشتراک برنامه وارد کنید.</p>
+      <div class="field">
+        <label for="subscription-link">لینک اصلی اشتراک</label>
+        <div class="controls">
+          <input id="subscription-link" dir="ltr" readonly value="{{.Link}}">
+          <button type="button" hidden aria-label="کپی لینک اصلی اشتراک">کپی لینک</button>
+        </div>
+        <p class="feedback" role="status"></p>
+      </div>
+      <div class="field">
+        <label for="mihomo-link">لینک اشتراک <bdi>Mihomo</bdi></label>
+        <div class="controls">
+          <input id="mihomo-link" dir="ltr" readonly value="{{.Link}}/clash">
+          <button type="button" hidden aria-label="کپی لینک اشتراک Mihomo">کپی لینک</button>
+        </div>
+        <p class="feedback" role="status"></p>
+      </div>
+    </section>
+  </main>
+  <script nonce="{{.Nonce}}">
+    for (const field of document.querySelectorAll('.field')) {
+      const button = field.querySelector('button');
+      const input = field.querySelector('input');
+      const feedback = field.querySelector('[role="status"]');
+
+      button.hidden = false;
+      button.addEventListener('click', async () => {
+        feedback.textContent = '';
+        try {
+          await navigator.clipboard.writeText(input.value);
+          feedback.textContent = 'لینک کپی شد.';
+        } catch {
+          input.focus();
+          input.select();
+          feedback.textContent = 'لینک انتخاب شد. از گزینهٔ کپی دستگاه استفاده کنید.';
+        }
+      });
+    }
+  </script>
+</body>
+</html>
