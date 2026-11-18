@@ -134,3 +134,49 @@ func TestDNSAddressIsAlwaysDNSOnly(t *testing.T) {
 		t.Fatalf("unsafe record: %+v", published)
 	}
 }
+
+func TestCloudflareEdgeRefusesConflictingOriginAddress(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("name") != "cf-node.example.com" {
+			t.Errorf("unexpected Cloudflare request: %s %s", r.Method, r.URL)
+		}
+		_, _ = w.Write([]byte("{\"success\":true,\"result\":[{\"id\":\"foreign\",\"type\":\"AAAA\",\"comment\":\"owned by someone else\"}]}"))
+	}))
+	defer api.Close()
+	d := DNS{Base: api.URL, Zone: "test", Client: api.Client()}
+	if err := d.ensureAddress(context.Background(), "cf-node.example.com", "192.0.2.10", "edge-node", true); err == nil {
+		t.Fatal("accepted a proxied hostname with an existing address owned by someone else")
+	}
+}
+
+func TestCloudflareEdgeStrictTargetsOnlyItsHosts(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/zones/test/settings/ssl":
+			_, _ = w.Write([]byte("{\"success\":true,\"result\":{\"value\":\"full\"}}"))
+		case "/zones/test/rulesets/phases/http_config_settings/entrypoint":
+			_, _ = w.Write([]byte("{\"success\":true,\"result\":{\"id\":\"zone-rules\",\"rules\":[{\"id\":\"unrelated-rule\",\"ref\":\"user-rule\"}]}}"))
+		case "/zones/test/rulesets/zone-rules/rules":
+			var body struct {
+				Ref, Expression, Action string
+				Parameters              map[string]string `json:"action_parameters"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if r.Method != http.MethodPost || body.Ref != "rahpanel_cloudflare_ws" || body.Action != "set_config" ||
+				body.Expression != "http.host in {\"cf-a.example.com\" \"cf-z.example.com\"}" || body.Parameters["ssl"] != "strict" {
+				t.Errorf("unexpected request to add rule: %s %+v", r.Method, body)
+			}
+			_, _ = w.Write([]byte("{\"success\":true,\"result\":{}}"))
+		default:
+			t.Errorf("modified an unrelated resource: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer api.Close()
+	d := DNS{Base: api.URL, Zone: "test", Client: api.Client()}
+	if err := d.edgeStrict(context.Background(), []string{"cf-z.example.com", "cf-a.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+}

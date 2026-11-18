@@ -55,12 +55,19 @@ func probeTransport(ctx context.Context, binary []byte, n core.Node, kind, healt
 	stream := map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"serverName": n.RealitySNI, "fingerprint": "chrome", "publicKey": n.RealityPublic, "shortId": n.ShortID, "spiderX": "/"}}
 	protocol := "vless"
 	targetPort := ports.Reality
+	targetHost := n.Host
 	user := map[string]any{"id": credential.UUID, "encryption": "none", "flow": "xtls-rprx-vision"}
 	settings := map[string]any{}
-	if kind == "websocket" {
+	if kind == "websocket" || kind == "ws-cloudflare" {
+		serverName := n.Domain
 		targetPort = ports.WebSocket
+		if kind == "ws-cloudflare" {
+			serverName = n.CloudflareWS.Hostname
+			targetHost = serverName
+			targetPort = 443
+		}
 		user = map[string]any{"id": credential.UUID, "encryption": "none"}
-		stream = map[string]any{"network": "ws", "security": "tls", "tlsSettings": map[string]any{"serverName": n.Domain}, "wsSettings": map[string]any{"path": n.WSPath, "headers": map[string]string{"Host": n.Domain}}}
+		stream = map[string]any{"network": "ws", "security": "tls", "tlsSettings": map[string]any{"serverName": serverName}, "wsSettings": map[string]any{"path": n.WSPath, "headers": map[string]string{"Host": serverName}}}
 	}
 	if kind == "hysteria2" {
 		protocol = "hysteria"
@@ -72,7 +79,7 @@ func probeTransport(ctx context.Context, binary []byte, n core.Node, kind, healt
 		settings["servers"] = []any{map[string]any{"address": n.Host, "port": targetPort, "password": credential.Password}}
 		stream = map[string]any{"network": "tcp", "security": "tls", "tlsSettings": map[string]string{"serverName": n.Domain}}
 	} else {
-		settings["vnext"] = []any{map[string]any{"address": n.Host, "port": targetPort, "users": []any{user}}}
+		settings["vnext"] = []any{map[string]any{"address": targetHost, "port": targetPort, "users": []any{user}}}
 	}
 	cfg := map[string]any{"log": map[string]string{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]string{"auth": "noauth"}}}, "outbounds": []any{map[string]any{"protocol": protocol, "settings": settings, "streamSettings": stream}}}
 	raw, _ := json.Marshal(cfg)

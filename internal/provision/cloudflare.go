@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -172,6 +174,10 @@ func (d DNS) TestWrite(ctx context.Context, domain string) error {
 }
 
 func (d DNS) EnsureAddress(ctx context.Context, domain, ip, nodeID string) error {
+	return d.ensureAddress(ctx, domain, ip, nodeID, false)
+}
+
+func (d DNS) ensureAddress(ctx context.Context, domain, ip, nodeID string, proxied bool) error {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
 		return fmt.Errorf("invalid IP")
@@ -181,17 +187,55 @@ func (d DNS) EnsureAddress(ctx context.Context, domain, ip, nodeID string) error
 		kind = "AAAA"
 	}
 	var records []record
-	if e := d.call(ctx, "GET", "/dns_records?type="+kind+"&name="+url.QueryEscape(domain), nil, &records); e != nil {
+	path := "/dns_records?type=" + kind + "&name=" + url.QueryEscape(domain)
+	if proxied {
+		path = "/dns_records?name=" + url.QueryEscape(domain)
+	}
+	if e := d.call(ctx, "GET", path, nil, &records); e != nil {
 		return e
 	}
-	wanted := record{Type: kind, Name: domain, Content: ip, Comment: "rahpanel:" + nodeID, TTL: 60, Proxied: false}
+	var obsolete []string
+	if proxied {
+		matching := records[:0]
+		for _, r := range records {
+			switch r.Type {
+			case "CNAME":
+				return fmt.Errorf("a CNAME is already using the hostname")
+			case "A", "AAAA":
+				if r.Comment != "rahpanel:"+nodeID {
+					return fmt.Errorf("DNS record exists and is not owned by this node")
+				}
+				if r.Type == kind {
+					matching = append(matching, r)
+				} else {
+					obsolete = append(obsolete, r.ID)
+				}
+			}
+		}
+		records = matching
+	}
+	wanted := record{Type: kind, Name: domain, Content: ip, Comment: "rahpanel:" + nodeID, TTL: 60, Proxied: proxied}
+	if proxied {
+		wanted.TTL = 1
+	}
 	if len(records) > 0 {
 		if len(records) != 1 || records[0].Comment != wanted.Comment {
 			return fmt.Errorf("DNS record exists and is not owned by this node")
 		}
-		return d.call(ctx, "PUT", "/dns_records/"+url.PathEscape(records[0].ID), wanted, nil)
+		if !proxied || records[0].Content != ip || !records[0].Proxied {
+			if err := d.call(ctx, "PUT", "/dns_records/"+url.PathEscape(records[0].ID), wanted, nil); err != nil {
+				return err
+			}
+		}
+	} else if err := d.call(ctx, "POST", "/dns_records", wanted, nil); err != nil {
+		return err
 	}
-	return d.call(ctx, "POST", "/dns_records", wanted, nil)
+	for _, id := range obsolete {
+		if err := d.Delete(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (d DNS) TXT(ctx context.Context, name, value string) (string, error) {
 	var r record
@@ -222,4 +266,77 @@ func waitTXT(ctx context.Context, name, value string) error {
 		case <-tick.C:
 		}
 	}
+}
+
+func (d DNS) removeEdgeAddress(ctx context.Context, hostname, id string) error {
+	var records []record
+	if err := d.call(ctx, "GET", "/dns_records?name="+url.QueryEscape(hostname), nil, &records); err != nil {
+		return err
+	}
+	for _, r := range records {
+		if (r.Type == "A" || r.Type == "AAAA") && r.Comment == "rahpanel:edge-"+id {
+			if err := d.Delete(ctx, r.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (d DNS) edgeStrict(ctx context.Context, hostnames []string) error {
+	enabled := len(hostnames) != 0
+	var setting struct{ Value string }
+	globalStrict := d.call(ctx, "GET", "/settings/ssl", nil, &setting) == nil && setting.Value == "strict"
+
+	const phase = "http_config_settings"
+	var ruleset struct {
+		ID    string
+		Rules []struct {
+			ID, Ref, Expression, Action string
+			ActionParameters            struct{ SSL string } `json:"action_parameters"`
+			Enabled                     bool
+		}
+	}
+	err := d.call(ctx, "GET", "/rulesets/phases/"+phase+"/entrypoint", nil, &ruleset)
+	if (!enabled && err == cloudflareRejection(404)) || (globalStrict && (err == cloudflareRejection(403) || err == cloudflareRejection(401) || err == cloudflareRejection(404))) {
+		return nil
+	}
+	if err != nil && err != cloudflareRejection(404) {
+		return err
+	}
+
+	const ref = "rahpanel_cloudflare_ws"
+	quoted := make([]string, 0, len(hostnames))
+	for _, hostname := range hostnames {
+		quoted = append(quoted, strconv.Quote(hostname))
+	}
+	sort.Strings(quoted)
+	expression := "http.host in {" + strings.Join(quoted, " ") + "}"
+	rule := map[string]any{
+		"ref": ref, "expression": expression, "action": "set_config", "enabled": true,
+		"description": "Rah Panel WebSocket routes", "action_parameters": map[string]string{"ssl": "strict"},
+	}
+	path := "/rulesets/" + url.PathEscape(ruleset.ID) + "/rules"
+	for _, current := range ruleset.Rules {
+		if current.Ref != ref {
+			continue
+		}
+		item := path + "/" + url.PathEscape(current.ID)
+		if !enabled {
+			return d.call(ctx, "DELETE", item, nil, nil)
+		}
+		if current.Expression == expression && current.Action == "set_config" && current.Enabled && current.ActionParameters.SSL == "strict" {
+			return nil
+		}
+		return d.call(ctx, "PATCH", item, rule, nil)
+	}
+	if !enabled || globalStrict {
+		return nil
+	}
+	if ruleset.ID == "" {
+		return d.call(ctx, "POST", "/rulesets", map[string]any{
+			"name": "Rah Panel", "kind": "zone", "phase": phase, "rules": []any{rule},
+		}, nil)
+	}
+	return d.call(ctx, "POST", path, rule, nil)
 }

@@ -118,3 +118,5 @@ CREATE TABLE IF NOT EXISTS bot_referral_rewards (
     days bigint NOT NULL, gib bigint NOT NULL, applied_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS bot_referral_pending ON bot_referral_rewards(inviter) WHERE applied_at IS NULL;
+
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS cloudflare_ws boolean;

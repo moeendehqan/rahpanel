@@ -89,6 +89,10 @@ func main() {
 	w := provision.NewWorker(s, &ca)
 	api := server.New(s, w, public, env("WEB_DIR", "web/dist"), env("INSECURE_DEV", "false") != "true")
 	api.AgentURL = agentURL
+	api.Edge = provision.NewCloudflareEdge(s, os.Getenv("RAH_EDGE_SOCKET"), os.Getenv("PANEL_HOST"), agentURL, os.Getenv("RAH_EDGE_IP"), public)
+	if api.Edge != nil {
+		go api.Edge.Run(ctx)
+	}
 	go w.Run(ctx)
 	go s.MaintainUsage(ctx)
 	go api.RunWebhooks(ctx)

@@ -95,6 +95,7 @@ func subscription(nodes []Node, creds []Credential, includeHysteria bool) string
 	type routeLine struct {
 		url     string
 		quality RouteQuality
+		edge    bool
 	}
 	var routes []routeLine
 	for _, n := range nodes {
@@ -109,7 +110,11 @@ func subscription(nodes []Node, creds []Credential, includeHysteria bool) string
 			if c.NodeID != n.ID {
 				continue
 			}
-			for _, kind := range n.Verified {
+			kinds := n.Verified
+			if n.CloudflareWS != nil && n.CloudflareWS.Enabled && n.CloudflareWS.Ready {
+				kinds = append(append([]string(nil), kinds...), "ws-cloudflare")
+			}
+			for _, kind := range kinds {
 				q := url.Values{}
 				scheme, secret, host, port := "vless", c.UUID, n.Domain, ports.WebSocket
 				q.Set("type", "tcp")
@@ -124,11 +129,17 @@ func subscription(nodes []Node, creds []Credential, includeHysteria bool) string
 					q.Set("fp", "chrome")
 					q.Set("flow", "xtls-rprx-vision")
 					q.Set("encryption", "none")
-				case "websocket":
+				case "websocket", "ws-cloudflare":
+					if kind == "ws-cloudflare" {
+						if n.CloudflareWS == nil || !n.CloudflareWS.Enabled || !n.CloudflareWS.Ready {
+							continue
+						}
+						host, port = n.CloudflareWS.Hostname, 443
+					}
 					q.Set("type", "ws")
 					q.Set("security", "tls")
-					q.Set("sni", n.Domain)
-					q.Set("host", n.Domain)
+					q.Set("sni", host)
+					q.Set("host", host)
 					q.Set("path", n.WSPath)
 					q.Set("encryption", "none")
 				case "hysteria2":
@@ -146,12 +157,19 @@ func subscription(nodes []Node, creds []Credential, includeHysteria bool) string
 				default:
 					continue
 				}
-				u := url.URL{Scheme: scheme, User: url.User(secret), Host: net.JoinHostPort(host, strconv.Itoa(port)), RawQuery: q.Encode(), Fragment: n.Name + " · " + kind}
-				routes = append(routes, routeLine{u.String(), n.RouteQuality[kind]})
+				label := kind
+				if kind == "ws-cloudflare" {
+					label = "WS Cloudflare"
+				}
+				u := url.URL{Scheme: scheme, User: url.User(secret), Host: net.JoinHostPort(host, strconv.Itoa(port)), RawQuery: q.Encode(), Fragment: n.Name + " · " + label}
+				routes = append(routes, routeLine{u.String(), n.RouteQuality[kind], kind == "ws-cloudflare"})
 			}
 		}
 	}
 	sort.SliceStable(routes, func(i, j int) bool {
+		if routes[i].edge != routes[j].edge {
+			return !routes[i].edge
+		}
 		a, b := routes[i].quality, routes[j].quality
 		if a.Weak != b.Weak {
 			return !a.Weak

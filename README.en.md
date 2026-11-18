@@ -134,3 +134,11 @@ The subscription dialog can issue or revoke a private account page separately fr
 Automatic quota reset is off by default. In the subscription dialog, set a period in days and inspect the next reset and group readiness. Upgrade the panel first, then the agents. Each enabled node must send fresh, timestamped reports before automatic reset can run. A traffic sample is attributed to the period containing its end time. Manual resets preserve the scheduled date.
 
 The optional webhook accepts one public HTTPS destination on port 443. The receiver should deduplicate by the JSON event id. Verify X-Rah-Signature as the hex HMAC-SHA256 of X-Rah-Timestamp, a literal dot, and the exact request body, using the configured secret. Settings changes cancel pending deliveries. The settings page shows the latest delivery attempts.
+
+### Cloudflare WebSocket fallback
+
+In **Servers**, enable Cloudflare for an individual ready server, or use the bulk action for ready servers. Rah adds the extra route to subscriptions after an authenticated end-to-end probe. The VPS hosting the Compose-managed Caddy receives the Cloudflare traffic on port 443 and forwards it over TLS to each node’s existing WebSocket listener. Direct node connections continue to use their existing addresses, certificates, and listeners.
+
+The provider token needs DNS Edit and Zone Read. Rah also needs permission to read the zone SSL setting when relying on an existing Full (strict) setting, or Zone > Config Rules > Edit to manage hostname-specific Full (strict) rules. Cloudflare’s edge certificate must cover the generated names, and the zone must allow WebSocket upgrades. A unique address from the DNS-only agent hostname or a ready shared-host node supplies the origin IP. For a deployment with multiple origin addresses, set the shared value RAH_EDGE_IP in the Compose environment.
+
+Disable the route in Servers to remove it from new subscriptions. The worker removes the Caddy route and cleans up its Cloudflare resources. Existing WebSocket streams on the Cloudflare route can remain open briefly while Caddy drains them. All Cloudflare fallback traffic uses the panel VPS network capacity.

@@ -354,6 +354,48 @@ func TestAdminLoginUserLifecycleAndSecretRedaction(t *testing.T) {
 			t.Fatal("Cloudflare test changed stored settings", err)
 		}
 	})
+	t.Run("Cloudflare toggle preserves direct node state", func(t *testing.T) {
+		srv.Edge = provision.NewCloudflareEdge(s, "test-only", "panel.example.com", "https://agent.example.com:9443", "", srv.PublicURL)
+		t.Cleanup(func() { srv.Edge = nil })
+		res := request("POST", "/api/v1/nodes", "{\"name\":\"Edge test\",\"host\":\"192.0.2.52\",\"group_id\":\"default\"}", cookie)
+		if res.Code != http.StatusCreated {
+			t.Fatalf("create node: %d %s", res.Code, res.Body)
+		}
+		var n core.Node
+		if err := json.Unmarshal(res.Body.Bytes(), &n); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/v1/nodes/" + n.ID + "/cloudflare-ws"
+		if got := request("PUT", path, "{\"enabled\":true}", cookie); got.Code != http.StatusConflict {
+			t.Fatalf("an unverified node was accepted: %d %s", got.Code, got.Body)
+		}
+		if _, err := s.DB.Exec("UPDATE nodes SET ready=true, verified='[\"websocket\",\"reality\"]', last_seen=now(), applied_version='direct-version' WHERE id=$1", n.ID); err != nil {
+			t.Fatal(err)
+		}
+		before, err := s.Node(context.Background(), n.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, enabled := range []bool{true, false} {
+			body, _ := json.Marshal(map[string]bool{"enabled": enabled})
+			if got := request("PUT", path, string(body), cookie); got.Code != http.StatusAccepted {
+				t.Fatalf("toggle %v: %d %s", enabled, got.Code, got.Body)
+			}
+			state, err := s.Node(context.Background(), n.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.CloudflareWSRequested == nil || *state.CloudflareWSRequested != enabled {
+				t.Fatalf("toggle %v was not persisted", enabled)
+			}
+			if state.Ports != before.Ports || state.Host != before.Host || state.Domain != before.Domain ||
+				state.WSPath != before.WSPath || state.Ready != before.Ready || state.Enabled != before.Enabled ||
+				!state.LastSeen.Equal(before.LastSeen) || state.AppliedVersion != before.AppliedVersion ||
+				strings.Join(state.Verified, ",") != strings.Join(before.Verified, ",") {
+				t.Fatalf("toggle %v modified the direct node configuration", enabled)
+			}
+		}
+	})
 	t.Run("changing node IP invalidates connection verification", func(t *testing.T) {
 		res := request("POST", "/api/v1/nodes", `{"name":"old name","host":"192.0.2.20","group_id":"default"}`, cookie)
 		if res.Code != 201 {

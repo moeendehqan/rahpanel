@@ -1,6 +1,10 @@
+{
+	admin unix//run/rah-edge/admin.sock|0666
+}
+
 {$PANEL_HOST} {
-    encode zstd gzip
-    @private_links path /sub/* /account/*
-    log_skip @private_links
-    reverse_proxy panel:8080
+	encode zstd gzip
+	@private_links path /sub/* /account/*
+	log_skip @private_links
+	reverse_proxy panel:8080
 }

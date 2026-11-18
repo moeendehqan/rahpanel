@@ -31,6 +31,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?required initially}
       PUBLIC_URL: ${PUBLIC_URL:?required}
       AGENT_URL: ${AGENT_URL:?required}
+      RAH_EDGE_IP: ${RAH_EDGE_IP:-}
+      RAH_EDGE_SOCKET: /run/rah-edge/admin.sock
+      PANEL_HOST: ${PANEL_HOST:?required}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_BOT_TERMS: ${TELEGRAM_BOT_TERMS:-}
       TELEGRAM_BOT_SUPPORT: ${TELEGRAM_BOT_SUPPORT:-}
@@ -48,6 +51,9 @@ services:
       start_period: 30s
     restart: unless-stopped
     logging: *logging
+    volumes:
+      - edge_admin:/run/rah-edge:ro
+      - ./deploy/Caddyfile:/run/rah-edge-base/Caddyfile:ro
     read_only: true
     tmpfs:
       - /tmp:exec,size=256m,mode=1777
@@ -62,13 +68,14 @@ services:
       - "443:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge_admin:/run/rah-edge
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       panel:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--output-document", "/dev/null", "http://127.0.0.1:2019/config/"]
+      test: ["CMD", "test", "-S", "/run/rah-edge/admin.sock"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -79,3 +86,4 @@ volumes:
   database:
   caddy_data:
   caddy_config:
+  edge_admin:

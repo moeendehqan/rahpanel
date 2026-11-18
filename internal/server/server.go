@@ -24,6 +24,7 @@ import (
 type Server struct {
 	Store         *store.Store
 	Worker        *provision.Worker
+	Edge          *provision.CloudflareEdge
 	PublicURL     string
 	AgentURL      string
 	SecureCookies bool
@@ -92,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/nodes", s.authorize(s.nodes))
 	m.HandleFunc("POST /api/v1/nodes", s.authorize(s.addNode))
 	m.HandleFunc("PUT /api/v1/nodes/{id}", s.authorize(s.updateNode))
+	m.HandleFunc("PUT /api/v1/nodes/{id}/cloudflare-ws", s.authorize(s.cloudflareWS))
 	m.HandleFunc("POST /api/v1/ssh/fingerprint", s.authorize(s.fingerprint))
 	m.HandleFunc("POST /api/v1/nodes/{id}/install", s.authorize(s.install))
 	m.HandleFunc("GET /api/v1/jobs", s.authorize(s.jobs))
@@ -254,6 +256,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	}
 	for i := range v {
 		s.Worker.ApplyRouteQuality(&v[i])
+		s.Edge.Apply(&v[i])
 	}
 	write(w, 200, v)
 }
@@ -618,6 +621,7 @@ func (s *Server) subscription(w http.ResponseWriter, r *http.Request) {
 		// Rank subscriptions using the live monitor samples.
 		n.RouteQuality = nil
 		s.Worker.ApplyRouteQuality(&n)
+		s.Edge.Apply(&n)
 		allowed = append(allowed, n)
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

@@ -26,31 +26,40 @@ type RouteQuality struct {
 }
 
 type Node struct {
-	RouteQuality   map[string]RouteQuality `json:"route_quality,omitempty"`
-	Hysteria2      bool                    `json:"hysteria2"`
-	SharedHost     bool                    `json:"shared_host"`
-	Ports          NodePorts               `json:"ports"`
-	PortsLocked    bool                    `json:"ports_locked"`
-	ID             string                  `json:"id"`
-	Name           string                  `json:"name"`
-	Host           string                  `json:"host"`
-	Domain         string                  `json:"domain"`
-	GroupID        string                  `json:"group_id"`
-	Enabled        bool                    `json:"enabled"`
-	Ready          bool                    `json:"ready"`
-	Verified       []string                `json:"verified"`
-	LastSeen       time.Time               `json:"last_seen"`
-	AppliedVersion string                  `json:"applied_version"`
-	LastError      string                  `json:"last_error"`
-	RealityTarget  string                  `json:"reality_target"`
-	RealitySNI     string                  `json:"reality_sni"`
-	RealityPrivate string                  `json:"-"`
-	RealityPublic  string                  `json:"reality_public"`
-	ShortID        string                  `json:"short_id"`
-	WSPath         string                  `json:"ws_path"`
+	CloudflareWSRequested *bool                   `json:"-"`
+	CloudflareWS          *CloudflareWSStatus     `json:"cloudflare_ws,omitempty"`
+	RouteQuality          map[string]RouteQuality `json:"route_quality,omitempty"`
+	Hysteria2             bool                    `json:"hysteria2"`
+	SharedHost            bool                    `json:"shared_host"`
+	Ports                 NodePorts               `json:"ports"`
+	PortsLocked           bool                    `json:"ports_locked"`
+	ID                    string                  `json:"id"`
+	Name                  string                  `json:"name"`
+	Host                  string                  `json:"host"`
+	Domain                string                  `json:"domain"`
+	GroupID               string                  `json:"group_id"`
+	Enabled               bool                    `json:"enabled"`
+	Ready                 bool                    `json:"ready"`
+	Verified              []string                `json:"verified"`
+	LastSeen              time.Time               `json:"last_seen"`
+	AppliedVersion        string                  `json:"applied_version"`
+	LastError             string                  `json:"last_error"`
+	RealityTarget         string                  `json:"reality_target"`
+	RealitySNI            string                  `json:"reality_sni"`
+	RealityPrivate        string                  `json:"-"`
+	RealityPublic         string                  `json:"reality_public"`
+	ShortID               string                  `json:"short_id"`
+	WSPath                string                  `json:"ws_path"`
 
 	RealityBehindNginx bool `json:"-"`
 }
+type CloudflareWSStatus struct {
+	Hostname string `json:"hostname"`
+	Enabled  bool   `json:"enabled"`
+	Ready    bool   `json:"ready"`
+	Error    string `json:"error,omitempty"`
+}
+
 type Credential struct {
 	UserID   string `json:"user_id"`
 	NodeID   string `json:"node_id"`
