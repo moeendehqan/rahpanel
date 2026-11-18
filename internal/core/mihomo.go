@@ -47,7 +47,18 @@ func MihomoSubscription(nodes []Node, creds []Credential) string {
 		out.WriteString("  - " + string(encoded) + "\n")
 		names = append(names, name)
 	}
-	group, _ := json.Marshal(map[string]any{"name": "Rah", "type": "select", "proxies": names})
+	manual := names
+	if len(names) >= 2 {
+		manual = append(append([]string(nil), names...), "Rah Auto")
+	}
+	group, _ := json.Marshal(map[string]any{"name": "Rah", "type": "select", "proxies": manual})
 	out.WriteString("proxy-groups:\n  - " + string(group) + "\n")
+	if len(names) >= 2 {
+		fallback, _ := json.Marshal(map[string]any{
+			"name": "Rah Auto", "type": "fallback", "proxies": names,
+			"url": "https://www.gstatic.com/generate_204", "interval": 60, "timeout": 5000,
+		})
+		out.WriteString("  - " + string(fallback) + "\n")
+	}
 	return out.String()
 }

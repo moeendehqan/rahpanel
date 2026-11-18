@@ -63,6 +63,8 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	dir := cfg.Directory
 	defer stop(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cert, e := tls.LoadX509KeyPair(filepath.Join(dir, "client.crt"), filepath.Join(dir, "client.key"))
 	if e != nil {
 		return e
@@ -101,7 +103,8 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	var snapshot core.Snapshot
 	have := false
-	lastReport := time.Time{}
+	lastSample := time.Time{}
+	var reports reportSender
 	lastPoll := time.Time{}
 	lastApplied := ""
 	lease := Lease{}
@@ -158,34 +161,6 @@ func Run(ctx context.Context, cfg Config) error {
 	_ = stop(ctx)
 	for {
 		now := time.Now()
-		if now.Sub(lastReport) >= 30*time.Second {
-			lastReport = now
-			if lastApplied != "" {
-				if e = sample(); e != nil {
-					return quarantine(e)
-				}
-			}
-			for len(state.Outbox) > 0 {
-				r := state.Outbox[0]
-				body, _ := json.Marshal(r)
-				req, _ := http.NewRequestWithContext(ctx, "POST", cfg.URL+"/agent/v1/report", bytes.NewReader(body))
-				req.Header.Set("Content-Type", "application/json")
-				res, e := client.Do(req)
-				if e != nil {
-					break
-				}
-				io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
-				res.Body.Close()
-				if res.StatusCode != 200 {
-					break
-				}
-				state.Outbox = state.Outbox[1:]
-				if e = Save(statePath, state); e != nil {
-					_ = stop(ctx)
-					return e
-				}
-			}
-		}
 		if now.Sub(lastPoll) >= 30*time.Second {
 			lastPoll = now
 			boot, up, bootErr := Boot()
@@ -299,6 +274,18 @@ func Run(ctx context.Context, cfg Config) error {
 				}
 			}
 		}
+		now = time.Now()
+		if now.Sub(lastSample) >= 30*time.Second {
+			lastSample = now
+			if lastApplied != "" {
+				if e = sample(); e != nil {
+					return quarantine(e)
+				}
+			}
+		}
+		if e = reports.step(ctx, now, client, cfg.URL, statePath, &state); e != nil {
+			return e
+		}
 		select {
 		case <-ctx.Done():
 			if running(context.Background()) {
@@ -310,6 +297,67 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 }
+
+type reportResult struct {
+	id string
+	ok bool
+}
+
+type reportSender struct {
+	pending <-chan reportResult
+	retryAt time.Time
+}
+
+// step is called only by the agent loop, which owns the outbox and its persistence.
+func (s *reportSender) step(ctx context.Context, now time.Time, client *http.Client, panelURL, statePath string, state *State) error {
+	if s.pending != nil {
+		select {
+		case result := <-s.pending:
+			s.pending = nil
+			if !result.ok {
+				s.retryAt = now.Add(30 * time.Second)
+				return nil
+			}
+			if len(state.Outbox) > 0 && state.Outbox[0].ID == result.id {
+				state.Outbox = state.Outbox[1:]
+				if err := Save(statePath, state); err != nil {
+					return err
+				}
+			}
+		default:
+			return nil
+		}
+	}
+	if ctx.Err() != nil || len(state.Outbox) == 0 || now.Before(s.retryAt) {
+		return nil
+	}
+	result := make(chan reportResult, 1)
+	s.pending = result
+	go func(report core.Report) {
+		result <- reportResult{id: report.ID, ok: sendReport(ctx, client, panelURL, report)}
+	}(state.Outbox[0])
+	return nil
+}
+
+func sendReport(ctx context.Context, client *http.Client, panelURL string, report core.Report) bool {
+	body, err := json.Marshal(report)
+	if err != nil {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, panelURL+"/agent/v1/report", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+	return res.StatusCode == http.StatusOK
+}
+
 func running(ctx context.Context) bool {
 	b, e := command(ctx, "systemctl", "show", "rah-xray.service", "--property=MainPID", "--value")
 	return e == nil && strings.TrimSpace(string(b)) != "0" && strings.TrimSpace(string(b)) != ""
