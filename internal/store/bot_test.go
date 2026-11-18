@@ -112,6 +112,39 @@ func TestBotOrderLifecycle(t *testing.T) {
 	must(s.SaveBotPlan(ctx, plan))
 	paid, err := s.PrepareBotOrder(ctx, telegramID, plan.ID)
 	must(err)
+	resumed, err := s.ReviewBotOrder(ctx, paid.ID, telegramID)
+	must(err)
+	if resumed.ID != paid.ID || resumed.Plan.Stars != paid.Plan.Stars || resumed.Status != "pending" {
+		t.Fatalf("unexpected resumed order: %+v", resumed)
+	}
+	if _, err := s.ReviewBotOrder(ctx, paid.ID, telegramID+1); !errors.Is(err, ErrBotUnavailable) {
+		t.Fatalf("wrong buyer: %v", err)
+	}
+	expiredOrder, err := s.PrepareBotOrder(ctx, telegramID, plan.ID)
+	must(err)
+	_, err = s.DB.ExecContext(ctx, "UPDATE bot_orders SET created_at=now()-interval '31 minutes' WHERE id=$1", expiredOrder.ID)
+	must(err)
+	if _, err := s.ReviewBotOrder(ctx, expiredOrder.ID, telegramID); !errors.Is(err, ErrBotOrderStale) {
+		t.Fatalf("expired order: %v", err)
+	}
+	plan.Stars++
+	must(s.SaveBotPlan(ctx, plan))
+	if _, err := s.ReviewBotOrder(ctx, paid.ID, telegramID); !errors.Is(err, ErrBotOrderStale) {
+		t.Fatalf("changed price: %v", err)
+	}
+	fresh, err := s.PrepareBotOrder(ctx, telegramID, plan.ID)
+	must(err)
+	if fresh.ID == paid.ID || fresh.Plan.Stars != plan.Stars {
+		t.Fatalf("unexpected fresh order: %+v", fresh)
+	}
+	plan.Enabled = false
+	must(s.SaveBotPlan(ctx, plan))
+	if _, err := s.ReviewBotOrder(ctx, fresh.ID, telegramID); !errors.Is(err, ErrBotUnavailable) {
+		t.Fatalf("disabled plan: %v", err)
+	}
+	plan.Enabled = true
+	plan.Stars--
+	must(s.SaveBotPlan(ctx, plan))
 	_, err = s.ProcessBotOrder(ctx, paid.ID, telegramID, "invoice", "", 0, "")
 	must(err)
 	if _, err = s.ProcessBotOrder(ctx, paid.ID, telegramID, "checkout", "XTR", 9, "wrong"); !errors.Is(err, ErrBotUnavailable) {
@@ -122,6 +155,11 @@ func TestBotOrderLifecycle(t *testing.T) {
 	}
 	_, err = s.ProcessBotOrder(ctx, paid.ID, telegramID, "checkout", "XTR", 10, "checkout")
 	must(err)
+	resumed, err = s.ReviewBotOrder(ctx, paid.ID, telegramID)
+	must(err)
+	if resumed.Status != "approved" {
+		t.Fatalf("order in checkout: %+v", resumed)
+	}
 	if _, err = s.ProcessBotOrder(ctx, paid.ID, telegramID, "checkout", "XTR", 10, "second-checkout"); !errors.Is(err, ErrBotUnavailable) {
 		t.Fatalf("duplicate checkout: %v", err)
 	}
@@ -135,6 +173,11 @@ func TestBotOrderLifecycle(t *testing.T) {
 	must(err)
 	if final.QuotaBytes != 500 || !final.ExpiresAt.Equal(renewed.ExpiresAt.AddDate(0, 0, 1)) {
 		t.Fatal("receipt applied incorrectly")
+	}
+	resumed, err = s.ReviewBotOrder(ctx, paid.ID, telegramID)
+	must(err)
+	if resumed.Status != "fulfilled" {
+		t.Fatalf("completed order: %+v", resumed)
 	}
 	retry, err := s.PrepareBotOrder(ctx, telegramID, plan.ID)
 	must(err)

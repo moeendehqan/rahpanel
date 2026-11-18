@@ -14,6 +14,9 @@ import (
 )
 
 var ErrBotPurchaseLimit = errors.New("telegram plan purchase limit reached")
+var ErrBotOrderStale = errors.New("telegram order expired or plan changed")
+
+const botOrderLifetime = 30 * time.Minute
 
 var ErrBotUnavailable = errors.New("telegram subscription operation unavailable")
 
@@ -208,6 +211,83 @@ func (s *Store) PrepareBotOrder(ctx context.Context, telegramID int64, planID st
 	return o, err
 }
 
+// ReviewBotOrder reads the buyer's paid order without advancing checkout.
+// Only a stale order with an eligible, enabled plan can be recreated.
+func (s *Store) ReviewBotOrder(ctx context.Context, id string, telegramID int64) (BotOrder, error) {
+	o, available, enabled, _, err := readBotOrder(ctx, s.DB, id, telegramID, "")
+	if err != nil {
+		return o, err
+	}
+	if o.Plan.Stars <= 0 {
+		return o, ErrBotUnavailable
+	}
+	if o.Status != "pending" && o.Status != "invoiced" {
+		return o, nil
+	}
+	u, err := botUser(ctx, s.DB, telegramID, "")
+	if err != nil {
+		return o, err
+	}
+	if !enabled || u.ID != o.UserID || (u.ID != "" && !u.Enabled) {
+		return o, ErrBotUnavailable
+	}
+	now := time.Now()
+	if !available || now.Sub(o.CreatedAt) > botOrderLifetime {
+		updated := o
+		err = s.DB.QueryRowContext(ctx, "SELECT group_id,stars,quota_bytes FROM bot_plans WHERE id=$1 AND enabled", o.Plan.ID).
+			Scan(&updated.Plan.GroupID, &updated.Plan.Stars, &updated.Plan.QuotaBytes)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && !botEligible(u, updated, now)) {
+			return o, ErrBotUnavailable
+		}
+		if err != nil {
+			return o, err
+		}
+		if err := s.checkBotPurchaseLimit(ctx, s.DB, o, telegramID, u.ID, true); err != nil {
+			return o, err
+		}
+		return o, ErrBotOrderStale
+	}
+	if !botEligible(u, o, now) {
+		return o, ErrBotUnavailable
+	}
+	return o, s.checkBotPurchaseLimit(ctx, s.DB, o, telegramID, u.ID, true)
+}
+
+func readBotOrder(ctx context.Context, q botQueryer, id string, telegramID int64, lock string) (BotOrder, bool, bool, string, error) {
+	o := BotOrder{ID: id, TelegramID: telegramID}
+	var available, enabled bool
+	var checkoutID string
+	p := &o.Plan
+	err := q.QueryRowContext(ctx, `SELECT coalesce(o.user_id,''),o.group_id,o.days,o.quota_bytes,o.stars,o.status,coalesce(o.charge_id,''),
+ p.enabled AND p.group_id=o.group_id AND p.days=o.days AND p.quota_bytes=o.quota_bytes AND p.stars=o.stars AND p.name=o.plan_name,
+ o.created_at,coalesce(o.checkout_id,''),o.plan_id,p.purchase_limit,o.plan_name,p.enabled
+ FROM bot_orders o JOIN bot_plans p ON p.id=o.plan_id WHERE o.id=$1 AND o.telegram_id=$2`+lock, id, telegramID).
+		Scan(&o.UserID, &p.GroupID, &p.Days, &p.QuotaBytes, &p.Stars, &o.Status, &o.ChargeID, &available, &o.CreatedAt, &checkoutID, &p.ID, &p.PurchaseLimit, &p.Name, &enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = ErrBotUnavailable
+	}
+	return o, available, enabled, checkoutID, err
+}
+
+func (s *Store) checkBotPurchaseLimit(ctx context.Context, q botQueryer, o BotOrder, telegramID int64, userID string, includeApproved bool) error {
+	if o.Plan.PurchaseLimit == 0 {
+		return nil
+	}
+	var limited bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM bot_orders
+		WHERE plan_id=$1 AND id<>$2 AND (telegram_id=$3 OR user_id=nullif($4,''))
+		AND (
+			(status='fulfilled' AND ($5=1 OR coalesce(fulfilled_at,created_at)>now()-interval '720 hours'))
+			OR ($6 AND status='approved' AND coalesce(approved_at,created_at)>now()-interval '30 minutes')
+		)
+	)`, o.Plan.ID, o.ID, telegramID, userID, o.Plan.PurchaseLimit, includeApproved).Scan(&limited)
+	if err == nil && limited {
+		return ErrBotPurchaseLimit
+	}
+	return err
+}
+
 // ProcessBotOrder claims a free order, authorizes checkout, or applies a receipt.
 // A valid receipt for an account that changed after checkout is kept for support.
 func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64, stage, currency string, stars int, charge string) (string, error) {
@@ -216,21 +296,11 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 		return "", err
 	}
 	defer tx.Rollback()
-	var o BotOrder
-	var available bool
-	var checkoutID, planID string
-	p := &o.Plan
-	err = tx.QueryRowContext(ctx, `SELECT coalesce(o.user_id,''),o.group_id,o.days,o.quota_bytes,o.stars,o.status,coalesce(o.charge_id,''),
- p.enabled AND p.group_id=o.group_id AND p.days=o.days AND p.quota_bytes=o.quota_bytes AND p.stars=o.stars,
- o.created_at,coalesce(o.checkout_id,''),o.plan_id,p.purchase_limit FROM bot_orders o JOIN bot_plans p ON p.id=o.plan_id
- WHERE o.id=$1 AND o.telegram_id=$2 FOR UPDATE OF o`, id, telegramID).
-		Scan(&o.UserID, &p.GroupID, &p.Days, &p.QuotaBytes, &p.Stars, &o.Status, &o.ChargeID, &available, &o.CreatedAt, &checkoutID, &planID, &p.PurchaseLimit)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrBotUnavailable
-	}
+	o, available, _, checkoutID, err := readBotOrder(ctx, tx, id, telegramID, " FOR UPDATE OF o")
 	if err != nil {
 		return "", err
 	}
+	p := &o.Plan
 	if stage == "receipt" {
 		if charge == "" || currency != "XTR" || stars != p.Stars || p.Stars == 0 {
 			return "", ErrBotUnavailable
@@ -245,7 +315,7 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 		if stage == "free" && o.Status == "fulfilled" && p.Stars == 0 {
 			return o.Status, nil
 		}
-		if !available || time.Since(o.CreatedAt) > 30*time.Minute {
+		if !available || time.Since(o.CreatedAt) > botOrderLifetime {
 			return "", ErrBotUnavailable
 		}
 		switch stage {
@@ -272,22 +342,10 @@ func (s *Store) ProcessBotOrder(ctx context.Context, id string, telegramID int64
 	}
 	now := time.Now()
 	status := "fulfilled"
-	limited := false
-	if p.PurchaseLimit != 0 {
-		err = tx.QueryRowContext(ctx, `SELECT EXISTS(
-			SELECT 1 FROM bot_orders
-			WHERE plan_id=$1 AND id<>$2 AND (telegram_id=$3 OR user_id=nullif($4,''))
-			AND (
-				(status='fulfilled' AND ($5=1 OR coalesce(fulfilled_at,created_at)>now()-interval '720 hours'))
-				OR ($6 AND status='approved' AND coalesce(approved_at,created_at)>now()-interval '30 minutes')
-			)
-		)`, planID, id, telegramID, u.ID, p.PurchaseLimit, stage != "receipt").Scan(&limited)
-		if err != nil {
-			return "", err
-		}
-	}
-	if limited && stage != "receipt" {
-		return "", ErrBotPurchaseLimit
+	err = s.checkBotPurchaseLimit(ctx, tx, o, telegramID, u.ID, stage != "receipt")
+	limited := errors.Is(err, ErrBotPurchaseLimit)
+	if err != nil && (!limited || stage != "receipt") {
+		return "", err
 	}
 	if limited || !botEligible(u, o, now) {
 		if stage != "receipt" {

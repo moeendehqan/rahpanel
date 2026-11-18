@@ -59,6 +59,7 @@ type update struct {
 type button struct {
 	Text     string            `json:"text"`
 	Data     string            `json:"callback_data,omitempty"`
+	URL      string            `json:"url,omitempty"`
 	CopyText map[string]string `json:"copy_text,omitempty"`
 }
 
@@ -262,6 +263,51 @@ func (b Bot) list(ctx context.Context, id int64) {
 	}
 }
 
+func (b Bot) showOrder(ctx context.Context, id int64, order store.BotOrder) {
+	text := "جزئیات سفارش\n\n" + offer(order.Plan)
+	rows := [][]button{{{Text: "تأیید دریافت رایگان", Data: "free:" + order.ID}}}
+	if order.Plan.Stars > 0 {
+		text += fmt.Sprintf("\nهزینه پرداخت: %d ستاره\n\nشرایط خرید\n%s", order.Plan.Stars, b.Terms)
+		rows = [][]button{
+			{{Text: "پذیرش شرایط و دریافت فاکتور", Data: "invoice:" + order.ID}},
+			{{Text: "⭐ راهنمای تهیه ستاره", Data: "stars:" + order.ID}},
+		}
+	}
+	b.send(ctx, id, text, append(rows, []button{{Text: "بازگشت به پلن‌ها", Data: "list"}}, homeRow)...)
+}
+
+func (b Bot) resumeOrder(ctx context.Context, id int64, orderID, action string) {
+	order, err := b.Store.ReviewBotOrder(ctx, orderID, id)
+	switch {
+	case errors.Is(err, store.ErrBotOrderStale):
+		if action == "fresh" {
+			fresh, err := b.Store.PrepareBotOrder(ctx, id, order.Plan.ID)
+			if err == nil {
+				b.showOrder(ctx, id, fresh)
+				return
+			}
+			b.send(ctx, id, "این پلن در دسترس نیست.", plansRow, homeRow)
+			return
+		}
+		b.send(ctx, id, "مهلت سفارش تمام شده یا مشخصات پلن تغییر کرده است.",
+			[]button{{Text: "سفارش تازه", Data: "fresh:" + orderID}}, plansRow, homeRow)
+	case errors.Is(err, store.ErrBotPurchaseLimit):
+		b.send(ctx, id, "سقف خرید این پلن برای حساب شما تکمیل شده است.", plansRow, homeRow)
+	case err != nil:
+		b.send(ctx, id, "این سفارش در دسترس نیست.", plansRow, homeRow)
+	case order.Status == "fulfilled":
+		b.send(ctx, id, "این سفارش تکمیل شده است.", []button{{Text: "اشتراک من", Data: "mine"}}, homeRow)
+	case order.Status == "approved" || order.Status == "review":
+		b.send(ctx, id, "این سفارش در انتظار نتیجه یا بررسی پرداخت است. برای پیگیری با پشتیبانی تماس بگیرید.", supportRow, homeRow)
+	case action == "stars":
+		b.send(ctx, id, "⭐ راهنمای تهیه ستاره\n\nبرای شارژ موجودی، در اپ تلگرام به تنظیمات ← My Stars ← Buy Stars بروید یا از @PremiumBot استفاده کنید. بعد به بات برگردید و پرداخت را ادامه دهید.",
+			[]button{{Text: "باز کردن @PremiumBot", URL: "https://t.me/PremiumBot"}},
+			[]button{{Text: "بازگشت به سفارش", Data: "order:" + orderID}})
+	default:
+		b.showOrder(ctx, id, order)
+	}
+}
+
 func (b Bot) handle(ctx context.Context, u update) error {
 	if q := u.Checkout; q != nil {
 		deadline, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -305,22 +351,15 @@ func (b Bot) handle(ctx context.Context, u update) error {
 			b.showUser(ctx, id)
 		case "referrals":
 			b.showReferrals(ctx, id)
+		case "stars", "order", "fresh":
+			b.resumeOrder(ctx, id, arg, action)
 		case "plan":
 			order, err := b.Store.PrepareBotOrder(ctx, id, arg)
 			if err != nil {
 				b.send(ctx, id, "این پلن در حال حاضر برای حساب شما قابل دریافت نیست.", plansRow, homeRow)
 				return nil
 			}
-			label, action := "تأیید دریافت رایگان", "free:"
-			if order.Plan.Stars > 0 {
-				label, action = "پذیرش شرایط و دریافت فاکتور", "invoice:"
-			}
-			text := "جزئیات سفارش\n\n" + offer(order.Plan)
-			if order.Plan.Stars > 0 {
-				text += "\n\nشرایط خرید\n" + b.Terms
-			}
-			b.send(ctx, id, text, []button{{Text: label, Data: action + order.ID}},
-				[]button{{Text: "بازگشت به پلن‌ها", Data: "list"}}, homeRow)
+			b.showOrder(ctx, id, order)
 		case "free", "invoice":
 			result, err := b.Store.ProcessBotOrder(ctx, arg, id, action, "", 0, "")
 			if errors.Is(err, store.ErrBotPurchaseLimit) {
