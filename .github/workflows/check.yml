@@ -19,6 +19,22 @@ jobs:
         with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
       - run: go test -race ./...
       - run: go vet ./...
+      - name: Verify Hysteria 2 with official Xray and Mihomo
+        run: |
+          set -euo pipefail
+          tools="$(mktemp -d)"
+          go run ./cmd/rahctl artifacts --dir "$tools/artifacts"
+          unzip -p "$tools/artifacts/xray-linux-amd64.zip" xray > "$tools/xray"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-compatible-v1.19.34.gz \
+            --output "$tools/mihomo.gz"
+          printf '%s  %s\n' 2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06 "$tools/mihomo.gz" | sha256sum --check
+          gzip -dc "$tools/mihomo.gz" > "$tools/mihomo"
+          chmod 700 "$tools/xray" "$tools/mihomo"
+          export TEST_XRAY_BIN="$tools/xray" TEST_MIHOMO_BIN="$tools/mihomo"
+          export TEST_HYSTERIA_DATABASE_URL="$TEST_DATABASE_URL"
+          go test ./internal/core -count=1
+          go test ./internal/provision -run '^TestHysteriaAcceptance$' -v -count=1 -timeout=5m
       - run: npm ci --legacy-peer-deps && npm test && npm run build
         working-directory: web
       - run: GOOS=linux GOARCH=amd64 go build ./cmd/agent && GOOS=linux GOARCH=arm64 go build ./cmd/agent

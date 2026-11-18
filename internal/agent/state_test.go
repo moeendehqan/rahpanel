@@ -1,10 +1,46 @@
 package agent
 
 import (
+	"encoding/json"
 	"github.com/rahpanel/rahpanel/internal/core"
 	"testing"
 	"time"
 )
+
+func TestPruneKeepsHysteriaProbeAndRemovesRevokedUser(t *testing.T) {
+	now := time.Now()
+	n := core.Node{ID: "node", Hysteria2: true, RealityPrivate: "test-only"}
+	user := core.User{ID: "user", Enabled: true, ExpiresAt: now.Add(time.Hour)}
+	raw, err := core.BuildConfig(n, []core.User{user}, []core.Credential{{NodeID: n.ID, UserID: user.ID, Password: "user-secret"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := Prune(raw, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Inbounds []struct {
+			Tag      string
+			Settings struct {
+				Clients []struct{ Auth, Email string }
+			}
+		}
+	}
+	if err := json.Unmarshal(pruned, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, inbound := range cfg.Inbounds {
+		if inbound.Tag == "hysteria2" {
+			clients := inbound.Settings.Clients
+			if len(clients) != 1 || clients[0].Auth != core.ProbeCredential(n).Password || clients[0].Email != "" {
+				t.Fatalf("unexpected Hysteria clients after revocation: %+v", clients)
+			}
+			return
+		}
+	}
+	t.Fatal("Hysteria inbound missing")
+}
 
 func TestCumulativeCountersBecomeDurableDeltas(t *testing.T) {
 	s := State{RunID: "run1", Baseline: map[string]int64{}, Outbox: []core.Report{}}

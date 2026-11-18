@@ -27,7 +27,7 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 	}
 	reality, ws, trojan, hysteria := []any{}, []any{}, []any{}, []any{}
 	probe := ProbeCredential(n)
-	hysteria = append(hysteria, map[string]any{"auth": probe.Password, "email": "rah-probe"})
+	hysteria = append(hysteria, map[string]any{"auth": probe.Password})
 	reality = append(reality, map[string]any{"id": probe.UUID, "flow": "xtls-rprx-vision"})
 	ws = append(ws, map[string]any{"id": probe.UUID})
 	trojan = append(trojan, map[string]any{"password": probe.Password})
@@ -44,6 +44,9 @@ func BuildConfig(n Node, users []User, creds []Credential, now time.Time) ([]byt
 	tls := map[string]any{"certificates": []any{map[string]any{"certificateFile": "/etc/rahpanel/tls.crt", "keyFile": "/etc/rahpanel/tls.key"}}, "minVersion": "1.2"}
 	inbound := func(tag, protocol string, port int, clients []any, stream any) any {
 		settings := map[string]any{"clients": clients}
+		if protocol == "hysteria" {
+			settings["version"] = 2
+		}
 		if protocol == "vless" {
 			settings["decryption"] = "none"
 		}

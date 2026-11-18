@@ -41,7 +41,7 @@ func MihomoSubscription(nodes []Node, creds []Credential) string {
 			if q.Get("security") == "reality" {
 				proxy["flow"] = q.Get("flow")
 				proxy["client-fingerprint"] = q.Get("fp")
-				proxy["reality-opts"] = map[string]string{"public-key": q.Get("pbk"), "short-id": q.Get("sid")}
+				proxy["reality-opts"] = map[string]any{"public-key": q.Get("pbk"), "short-id": q.Get("sid"), "support-x25519mlkem768": true}
 			} else {
 				proxy["network"] = "ws"
 				proxy["ws-opts"] = map[string]any{"path": q.Get("path"), "headers": map[string]string{"Host": q.Get("host")}}

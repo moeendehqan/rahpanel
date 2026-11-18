@@ -6,6 +6,8 @@ Run `go test ./...`, `go vet ./...`, frontend tests and production build. With a
 
 Lease tests use boot uptime, include reboot and deadline boundaries, and bound expiration by server time independently of node wall-clock skew. A fatal accounting failure must remain quarantined across reconciler restart.
 
+For the real Hysteria 2 gate, provide official Xray 26.11.9 and Mihomo 1.19.34 binaries, Python 3, curl, an isolated PostgreSQL database and an outbound TLS connection to www.apple.com. Run `TEST_XRAY_BIN=/path/to/xray TEST_MIHOMO_BIN=/path/to/mihomo TEST_HYSTERIA_DATABASE_URL='postgres://user:password@localhost/isolated_db?sslmode=disable' go test ./internal/provision -run '^TestHysteriaAcceptance$' -v -count=1 -timeout=5m`. It uses loopback ports 12053, 14443–14446, 15080–15082, 15085–15086, 15089–15091 and 18443. It validates generated configurations, TLS verification, TCP/UDP counters, two-way fallback, active traffic revocation and reconnection after restoration, and idempotent persistence to the shared user quota.
+
 ## Required live gates — not represented as locally verified
 
 - Provision two clean Ubuntu 24.04 hosts, including one arm64 if offered in a release, through the UI without editing host configuration.

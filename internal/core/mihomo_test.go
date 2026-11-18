@@ -66,6 +66,7 @@ func TestMihomoHysteria2Fallback(t *testing.T) {
 	plain := Subscription([]Node{node}, creds)
 	output := MihomoSubscription([]Node{node}, creds)
 	for _, want := range []string{
+		`"support-x25519mlkem768":true`,
 		`"port":443,"server":"n.example.com","skip-cert-verify":false,"sni":"n.example.com","type":"hysteria2"`,
 		`"proxies":["Rah Auto","1 · node · trojan","2 · node · hysteria2","3 · node · reality"]`,
 		`"proxies":["3 · node · reality","2 · node · hysteria2","1 · node · trojan"]`,

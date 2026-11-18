@@ -21,16 +21,20 @@ func TestPreflightProtectsOtherServicesOnSharedAndManagedHosts(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, managed, listeners, marker, want string
-		shared                                 bool
+		shared, hysteria                       bool
 	}{
-		{"nginx443isnotclaimed", "", "443=999", "", "", true},
-		{"nginx443canbeshared", "", "443=nginx:999", "NGINX_REALITY_443", "", false},
-		{"mixed443owners", "", "443=nginx:999;443=321", "", "PORT_CONFLICT:443", false},
-		{"foreignselectedport", "", "8443=999", "", "PORT_CONFLICT:8443", true},
-		{"ownreinstall", "node-test", "2087=321;8443=321", "", "", true},
-		{"foreignportonmanagedhost", "node-test", "8443=999", "", "PORT_CONFLICT:8443", true},
-		{"mixedowners", "node-test", "2087=321;2087=999", "", "PORT_CONFLICT:2087", true},
-		{"differentnodeinstallation", "other-node", "", "", "MANAGED_NODE_MISMATCH", true},
+		{"nginx443isnotclaimed", "", "443=999", "", "", true, false},
+		{"nginx443canbeshared", "", "443=nginx:999", "NGINX_REALITY_443", "", false, false},
+		{"mixed443owners", "", "443=nginx:999;443=321", "", "PORT_CONFLICT:443", false, false},
+		{"foreignselectedport", "", "8443=999", "", "PORT_CONFLICT:8443", true, false},
+		{"ownreinstall", "node-test", "2087=321;8443=321", "", "", true, false},
+		{"foreignportonmanagedhost", "node-test", "8443=999", "", "PORT_CONFLICT:8443", true, false},
+		{"mixedowners", "node-test", "2087=321;2087=999", "", "PORT_CONFLICT:2087", true, false},
+		{"differentnodeinstallation", "other-node", "", "", "MANAGED_NODE_MISMATCH", true, false},
+		{"hysteriaCoexistsWithTCP443", "", "443=999", "", "", true, true},
+		{"hysteriaProtectsForeignUDP443", "", "udp:443=999", "", "UDP_443_CONFLICT", true, true},
+		{"hysteriaAllowsOwnedUDP443", "node-test", "udp:443=321", "", "", true, true},
+		{"hysteriaRejectsMixedUDP443Owners", "node-test", "udp:443=321;udp:443=999", "", "UDP_443_CONFLICT", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -47,6 +51,13 @@ func TestPreflightProtectsOtherServicesOnSharedAndManagedHosts(t *testing.T) {
 				"systemctl": "echo 321\n",
 				"ss": `for entry in ${FAKE_LISTENERS//;/ }; do
  port=${entry%%=*}; pid=${entry#*=}
+ network=tcp
+ if [[ "$port" == udp:* ]]; then network=udp; port=${port#udp:}; fi
+ if [[ "$*" == *-lunp* ]]; then
+  [[ "$network" == udp ]] || continue
+ else
+  [[ "$network" == tcp ]] || continue
+ fi
  name=xray
  if [[ "$pid" == nginx:* ]]; then name=nginx; pid=${pid#*:}; fi
  if [[ "$*" == *":$port" ]]; then printf 'LISTEN 0 511 0.0.0.0:%s 0.0.0.0:* users:(("%s",pid=%s,fd=3))\n' "$port" "$name" "$pid"; fi
@@ -59,7 +70,7 @@ exit 0
 					t.Fatal(err)
 				}
 			}
-			script, err := preflightScript(core.Node{ID: "node-test", SharedHost: tc.shared})
+			script, err := preflightScript(core.Node{ID: "node-test", SharedHost: tc.shared, Hysteria2: tc.hysteria})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,6 +83,8 @@ exit 0
 			}
 			script = strings.Replace(script, ". /etc/os-release", "ID=ubuntu\nVERSION_ID=24.04", 1)
 			script = strings.Replace(script, "managed_dir='/etc/rahpanel'", "managed_dir="+shellQuote(shellPath(managed)), 1)
+			script = strings.ReplaceAll(script, "/etc/systemd/system/", shellPath(managed)+"/units/")
+			script = strings.ReplaceAll(script, "/usr/local/bin/rah-agent", shellPath(managed)+"/rah-agent")
 			script = "export PATH=" + shellQuote(shellPath(bin)) + ":$PATH\n" + script
 			cmd := exec.Command(bash, "-c", script)
 			cmd.Env = append(os.Environ(), "FAKE_LISTENERS="+tc.listeners)

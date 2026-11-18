@@ -18,9 +18,6 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// Set after the pinned release passes TCP/UDP accounting and revocation checks.
-const hysteria2AcceptanceVerified = false
-
 var (
 	errProbeStartup    = errors.New("probe client did not start")
 	errProbeConnection = errors.New("authenticated probe failed")

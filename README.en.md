@@ -74,7 +74,7 @@ GitHub Actions must be able to reach the server, and the SSH user needs access t
 
 If the deployment or its health checks fail, the workflow attempts to restore the previous checkout and panel image using the existing database. See the [release recovery drill](docs/recovery-drill.md) for verification and manual recovery.
 
-The image build fetches a pinned Xray version from its official release and verifies its checksum. The templates were tested with `v26.3.27`. Changing versions requires compatibility testing and a new release. Nodes keep their pinned version until updated.
+The image build fetches a pinned Xray version from its official release and verifies its checksum. The templates were tested with `v26.11.9`. Changing versions requires compatibility testing and a new release. Nodes keep their pinned version until updated.
 
 ## Adding a node
 
@@ -87,6 +87,8 @@ On a standalone node's first install, the panel can share TCP 443 between REALIT
 Enter the node name, IP address, and group in **Servers**. Compare the SSH fingerprint with the provider console before entering credentials. Track progress in the installation operations view. Failed installs can be retried. A panel restart interrupts incomplete installations and requires re-entering SSH credentials. Reinstalling the same node revokes its previous identity and can disconnect open sessions.
 
 The reference clients are v2rayNG and v2rayN. Add the subscription URL and enable TUN/VPN mode for device-wide coverage. System proxy mode covers only traffic routed through it. Automatic switching depends on the client.
+
+For Hysteria 2, enable it in the node installation/reinstallation form and allow UDP 443 in the provider firewall. Reinstallation installs the pinned Xray release. The panel publishes Hysteria 2 only after an authenticated tunnel check. Import the subscription URL ending in `/clash` into Mihomo and select `Rah Auto` for REALITY-first automatic fallback. Hysteria 2 shares the user's quota and access restrictions. The validated client is Mihomo 1.19.34.
 
 ## Backup and maintenance
 

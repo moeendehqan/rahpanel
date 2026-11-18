@@ -37,6 +37,7 @@ func TestGeneratedConfigurationAcceptedByPinnedXray(t *testing.T) {
 	if e = NewNodeKeys(&n); e != nil {
 		t.Fatal(e)
 	}
+	n.Hysteria2 = true
 	u := User{ID: ID(), Enabled: true, ExpiresAt: time.Now().Add(time.Hour)}
 	raw, e := BuildConfig(n, []User{u}, []Credential{{UserID: u.ID, NodeID: n.ID, UUID: ID(), Password: RandomToken()}}, time.Now())
 	if e != nil {

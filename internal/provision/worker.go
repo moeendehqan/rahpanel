@@ -68,10 +68,6 @@ func (w *Worker) run(parent context.Context, r Request) {
 	if r.SSH.Hysteria2 != nil {
 		n.Hysteria2 = *r.SSH.Hysteria2
 	}
-	if n.Hysteria2 && !hysteria2AcceptanceVerified {
-		fail("Hysteria 2 requires a release validated for per-user accounting and active session revocation")
-		return
-	}
 	var cfg Settings
 	if e = w.Store.GetSetting(ctx, "provider", &cfg); e != nil || cfg.Validate() != nil {
 		fail("Configure domain, Cloudflare and panel URLs first")
